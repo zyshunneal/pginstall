@@ -42,7 +42,7 @@
           password: "{{ business_user_passswd.stdout }}"
 
    - name: 拷贝标准化pg_hba文件
-     copy: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     template: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
 
    - name: 拷贝标准化postgrsql.conf文件
      copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644

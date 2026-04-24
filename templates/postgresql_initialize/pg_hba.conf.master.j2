@@ -16,7 +16,11 @@ host   all   +dbrole_readwrite_with_delete   10.179.0.0/16     scram-sha-256
 host replication  replication    127.0.0.1/32        scram-sha-256
 host replication  replication    10.189.0.0/16       scram-sha-256
 #--虚拟机望段为10.9，为保证测试添加的配置：
-host replication  replication    10.9.0.0/16         scram-sha-256 
+host replication  replication    10.9.0.0/16         scram-sha-256
+#--根据 inventory 动态放通 slave 和 offline 节点
+{% for h in (groups.get('slave', []) + groups.get('offline', [])) | unique %}
+host replication  replication    {{ h }}/32         scram-sha-256
+{% endfor %}
 
 #########以上部分为配置标准，每台PG实例都应这样配置#########
  
