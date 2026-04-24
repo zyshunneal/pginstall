@@ -144,6 +144,26 @@ ensure_postgres_user() {
 }
 
 
+ensure_service_accounts() {
+    if ! getent group pgbouncer >/dev/null 2>&1; then
+        addgroup --system pgbouncer
+    fi
+    if ! id pgbouncer >/dev/null 2>&1; then
+        adduser --system --ingroup pgbouncer --no-create-home \
+            --home /var/run/pgbouncer --shell /usr/sbin/nologin pgbouncer
+    fi
+    install -d -o pgbouncer -g pgbouncer -m 0755 /etc/pgbouncer /var/run/pgbouncer /var/log/pgbouncer
+
+    if ! getent group pgpool >/dev/null 2>&1; then
+        addgroup --system pgpool
+    fi
+    if ! id pgpool >/dev/null 2>&1; then
+        adduser --system --ingroup pgpool --no-create-home \
+            --home /var/run/pgpool --shell /usr/sbin/nologin pgpool
+    fi
+}
+
+
 setup_pgdg_apt_repo() {
     local codename="$1"
     local key_path="/etc/apt/trusted.gpg.d/pgdg.gpg"
@@ -407,6 +427,7 @@ main() {
     validate_pgversion
     ensure_postgres_user
     pg_install "${version}"
+    ensure_service_accounts
     dir_init
     optimize
     echo_success
