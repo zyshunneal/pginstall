@@ -31,7 +31,7 @@
        fi
      register: replica_state
      changed_when: false
-     when: inventory_hostname not in groups['master']
+     when: inventory_hostname not in groups.get('master', [])
 
    - name: 已是 standby 的实例先停止，避免 basebackup 冲突
      become: yes
@@ -39,20 +39,20 @@
      become_user: postgres
      shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1 && /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data stop -m fast -t 120 || true
      when:
-       - inventory_hostname not in groups['master']
+       - inventory_hostname not in groups.get('master', [])
        - replica_state.stdout == 'already_standby'
 
    - name: 清理残留的非 cluster 数据目录
      shell: find /mnt/storage00/pg/data -mindepth 1 -maxdepth 1 -exec rm -rf {} +
      when:
-       - inventory_hostname not in groups['master']
+       - inventory_hostname not in groups.get('master', [])
        - replica_state.stdout in ['empty', 'already_standby']
 
    - name: 防止误覆盖非 standby 的已有 cluster，直接失败
      fail:
        msg: "/mnt/storage00/pg/data 已存在 PG_VERSION 但不是 standby，拒绝覆盖；需人工介入。"
      when:
-       - inventory_hostname not in groups['master']
+       - inventory_hostname not in groups.get('master', [])
        - replica_state.stdout == 'existing_non_standby'
 
    - name: 构建slave 到 master 的主从关系
@@ -61,15 +61,15 @@
      become_user: postgres
      shell: /usr/pgsql/bin/pg_basebackup -D /mnt/storage00/pg/data -Fp -Xs -R -v -P -h {{ groups['master'][0] }} -p 5432 -U replication -c fast
      async: 0
-     when: inventory_hostname in groups['slave']
+     when: inventory_hostname in groups.get('slave', [])
 
    - name: 将 slave 的pg_hba.conf标准配置copy到slave上
      template: src=../templates/postgresql_initialize/pg_hba.conf.slave.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
-     when: inventory_hostname in groups['slave']
+     when: inventory_hostname in groups.get('slave', [])
 
    - name: 启动 salve 实例
      shell: su - postgres -c "chmod 0700 /mnt/storage00/pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600"
-     when: inventory_hostname in groups['slave']
+     when: inventory_hostname in groups.get('slave', [])
 
    - name: 构建offline 到 某个 slave 的主从关系
      become: yes
@@ -77,12 +77,12 @@
      become_user: postgres
      shell: /usr/pgsql/bin/pg_basebackup -D /mnt/storage00/pg/data -Fp -Xs -R -v -P -h {{ groups['slave'][0] }} -p 5432 -U replication -c fast
      async: 0
-     when: inventory_hostname in groups['offline']
+     when: inventory_hostname in groups.get('offline', [])
 
    - name: 将 offline 的pg_hba.conf标准配置copy到offline上
      template: src=../templates/postgresql_initialize/pg_hba.conf.offline.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
-     when: inventory_hostname in groups['offline']
+     when: inventory_hostname in groups.get('offline', [])
 
    - name: 启动 offline 实例
      shell: su - postgres -c "chmod 0700 /mnt/storage00/pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600"
-     when: inventory_hostname in groups['offline']
+     when: inventory_hostname in groups.get('offline', [])
