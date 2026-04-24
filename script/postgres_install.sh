@@ -150,11 +150,11 @@ setup_pgdg_apt_repo() {
     apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release wget
 
     install -d -m 0755 /usr/share/postgresql-common/pgdg
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/postgresql/keys/ACCC4CF8.asc \
         | gpg --dearmor > /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 
     cat > /etc/apt/sources.list.d/pgdg.list <<EOF
-deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${codename}-pgdg main
+deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt ${codename}-pgdg main
 EOF
 }
 
