@@ -331,7 +331,6 @@ optimize() {
         net.ipv4.tcp_synack_retries = 2
         net.ipv4.tcp_syncookies = 1
         net.ipv4.tcp_timestamps = 1
-        net.ipv4.tcp_tw_recycle = 0
         net.ipv4.tcp_tw_reuse = 1
         net.ipv4.tcp_max_tw_buckets = 262144
         net.ipv4.tcp_rmem = 8192 87380 16777216
@@ -341,7 +340,6 @@ optimize() {
         vm.dirty_expire_centisecs = 6000
         vm.dirty_ratio = 80
         vm.dirty_writeback_centisecs = 50
-        vm.extra_free_kbytes = 4096000
         vm.min_free_kbytes = 2097152
         vm.mmap_min_addr = 65536
         vm.swappiness = 0
@@ -349,7 +347,7 @@ optimize() {
         vm.overcommit_ratio = $(( (mem - swap) * 100 / mem ))
         vm.zone_reclaim_mode = 0
 EOF
-        sysctl -p
+        sysctl -p || echo_log "sysctl -p reported unknown keys, continuing."
 
         ensure_kernel_args
 
