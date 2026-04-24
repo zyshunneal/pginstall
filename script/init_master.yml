@@ -13,6 +13,8 @@
      become_method: sudo
      become_user: postgres
      shell: /usr/pgsql/bin/initdb  -D /pg/data/
+     args:
+       creates: /pg/data/PG_VERSION
 
    - name: 修改 目录 权限
      shell: "mkdir -p /var/run/postgresql && chown -R  postgres.postgres /var/run/postgresql"
@@ -21,7 +23,7 @@
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_ctl -D /pg/data/ start 
+     shell: /usr/pgsql/bin/pg_ctl -D /pg/data/ status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /pg/data/ start -w -t 3600
 
    - name: database、default yay schema and user 初始化
      script: "./user_init.sh -S {{ servername }}"
@@ -89,11 +91,28 @@
      become_user: postgres
      shell: /usr/pgsql/bin/pg_ctl  -D /pg/data/ restart -t 3600
 
+   - name: 停止可能已在运行的 pgbouncer
+     shell: |
+       if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
+         pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || true)
+         if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+           kill "${pid}" || true
+           for i in 1 2 3 4 5 6 7 8 9 10; do
+             kill -0 "${pid}" 2>/dev/null || break
+             sleep 1
+           done
+           kill -0 "${pid}" 2>/dev/null && kill -9 "${pid}" || true
+         fi
+         rm -f /var/run/pgbouncer/pgbouncer.pid
+       fi
+     args:
+       executable: /bin/bash
+
    - name: 启动 pgbouncer
      become: yes
      become_method: sudo
      become_user: pgbouncer
-     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini 
+     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
 
    - name: 主库初始化最后一步，验证用户连通性
      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK' "

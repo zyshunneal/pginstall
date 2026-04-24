@@ -237,23 +237,28 @@ dir_init() {
     local archive_dir='/mnt/storage00/arcwal'
     local backup_dir='/mnt/storage00/backup'
     local remote_dir='/mnt/storage00/remote'
+    local cluster_dir="${basedir}/postgresql/${servername}db_${version}"
 
     mkdir -p "${basedir}"
 
-    if [ ! -d "${basedir}/postgresql/${servername}db_${version}/" ]; then
-        mkdir -p "${basedir}/postgresql/${servername}db_${version}"/{bin,conf,data,tlog,tmp}
-        mkdir -p "${archive_dir}" "${backup_dir}" "${remote_dir}"
-        ln -sf "${basedir}/postgresql/${servername}db_${version}" /pg
-        ln -sf "${basedir}/postgresql/${servername}db_${version}/data/log" "${basedir}/postgresql/${servername}db_${version}"
-        ln -sf "${archive_dir}" "${basedir}/postgresql/${servername}db_${version}"
-        ln -sf "${backup_dir}" "${basedir}/postgresql/${servername}db_${version}"
-        ln -sf "${remote_dir}" "${basedir}/postgresql/${servername}db_${version}"
-        chown -R postgres:postgres "${basedir}/postgresql"
-        chown -R postgres:postgres "${archive_dir}" "${backup_dir}" "${remote_dir}"
+    if [ -f "${cluster_dir}/data/PG_VERSION" ]; then
+        echo_log "PostgreSQL cluster already initialized at ${cluster_dir}/data, keep existing layout."
     else
-        echo_failure "Building a standardized directory structure fail" "Directory ${basedir}/postgresql/${servername}db_${version}/ exists. Please check manually."
-        exit 1
+        if [ -d "${cluster_dir}" ]; then
+            echo_log "Stale directory ${cluster_dir} without PG_VERSION detected, cleaning up."
+            rm -rf "${cluster_dir}"
+        fi
+        mkdir -p "${cluster_dir}"/{bin,conf,data,tlog,tmp}
     fi
+
+    mkdir -p "${archive_dir}" "${backup_dir}" "${remote_dir}"
+    ln -sfn "${cluster_dir}" /pg
+    ln -sfn "${cluster_dir}/data/log" "${cluster_dir}/log"
+    ln -sfn "${archive_dir}" "${cluster_dir}/arcwal"
+    ln -sfn "${backup_dir}" "${cluster_dir}/backup"
+    ln -sfn "${remote_dir}" "${cluster_dir}/remote"
+    chown -R postgres:postgres "${basedir}/postgresql"
+    chown -R postgres:postgres "${archive_dir}" "${backup_dir}" "${remote_dir}"
 }
 
 

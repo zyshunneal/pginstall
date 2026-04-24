@@ -9,7 +9,7 @@
   become_method: sudo
   tasks:
    - name: 重启offline和slave实例
-     shell: su - postgres -c "chmod 0700 /pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data restart -t 3600"
+     shell: su - postgres -c "chmod 0700 /pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "if /usr/pgsql/bin/pg_ctl -D /pg/data status >/dev/null 2>&1; then /usr/pgsql/bin/pg_ctl -D /pg/data restart -w -t 3600; else /usr/pgsql/bin/pg_ctl -D /pg/data start -w -t 3600; fi"
      when: inventory_hostname != groups["master"][0]
 
    - name: 获取主库的所有pgbouncer的配置文件到本地
@@ -32,8 +32,27 @@
      shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
      when: inventory_hostname != groups["master"][0]
 
+   - name: 停止可能已在运行的 pgbouncer
+     shell: |
+       if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
+         pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || true)
+         if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+           kill "${pid}" || true
+           for i in 1 2 3 4 5 6 7 8 9 10; do
+             kill -0 "${pid}" 2>/dev/null || break
+             sleep 1
+           done
+           kill -0 "${pid}" 2>/dev/null && kill -9 "${pid}" || true
+         fi
+         rm -f /var/run/pgbouncer/pgbouncer.pid
+       fi
+     args:
+       executable: /bin/bash
+     when: inventory_hostname != groups["master"][0]
+
    - name: 启动offline和slave的pgbouncer
      become: yes
      become_method: sudo
      become_user: pgbouncer
      shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
+     when: inventory_hostname != groups["master"][0]

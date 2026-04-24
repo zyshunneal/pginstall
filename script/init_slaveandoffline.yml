@@ -11,6 +11,41 @@
    - name: 拷贝pgpass文件到机器的对应目录下，用于构建主从关系
      copy: src=../templates/postgresql_initialize/pgpass dest=/home/postgres/.pgpass force=yes backup=yes owner=postgres group=postgres mode=0600
 
+   - name: 判断 slave/offline 是否已经是 standby
+     shell: |
+       if [ -f /pg/data/standby.signal ] || [ -f /pg/data/recovery.conf ]; then
+         echo already_standby
+       elif [ -f /pg/data/PG_VERSION ]; then
+         echo existing_non_standby
+       else
+         echo empty
+       fi
+     register: replica_state
+     changed_when: false
+     when: inventory_hostname not in groups['master']
+
+   - name: 已是 standby 的实例先停止，避免 basebackup 冲突
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /pg/data status >/dev/null 2>&1 && /usr/pgsql/bin/pg_ctl -D /pg/data stop -m fast -t 120 || true
+     when:
+       - inventory_hostname not in groups['master']
+       - replica_state.stdout == 'already_standby'
+
+   - name: 清理残留的非 cluster 数据目录
+     shell: find /pg/data -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+     when:
+       - inventory_hostname not in groups['master']
+       - replica_state.stdout in ['empty', 'already_standby']
+
+   - name: 防止误覆盖非 standby 的已有 cluster，直接失败
+     fail:
+       msg: "/pg/data 已存在 PG_VERSION 但不是 standby，拒绝覆盖；需人工介入。"
+     when:
+       - inventory_hostname not in groups['master']
+       - replica_state.stdout == 'existing_non_standby'
+
    - name: 构建slave 到 master 的主从关系
      become: yes
      become_method: sudo
@@ -24,7 +59,7 @@
      when: inventory_hostname in groups['slave']
 
    - name: 启动 salve 实例
-     shell: su - postgres -c "chmod 0700 /pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data start -t 3600"
+     shell: su - postgres -c "chmod 0700 /pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /pg/data start -w -t 3600"
      when: inventory_hostname in groups['slave']
 
    - name: 构建offline 到 某个 slave 的主从关系
@@ -40,5 +75,5 @@
      when: inventory_hostname in groups['offline']
 
    - name: 启动 offline 实例
-     shell: su - postgres -c "chmod 0700 /pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data start -t 3600"
+     shell: su - postgres -c "chmod 0700 /pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /pg/data start -w -t 3600"
      when: inventory_hostname in groups['offline']

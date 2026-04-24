@@ -76,12 +76,55 @@ if [ -z "${servername:-}" ]; then
     exit 1
 fi
 
+USERINFO_FILE=/home/postgres/.userinfo.conf
+
+
+ensure_role() {
+    local role="$1"
+    local extra="$2"
+    psql -v ON_ERROR_STOP=1 -U postgres <<SQL
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}') THEN
+        CREATE ROLE "${role}";
+    END IF;
+END
+\$\$;
+ALTER ROLE "${role}" ${extra};
+SQL
+}
+
+
+ensure_database() {
+    local dbname="$1"
+    psql -v ON_ERROR_STOP=1 -U postgres -AXtqc \
+        "SELECT 'CREATE DATABASE \"${dbname}\"' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${dbname}');" \
+        | psql -v ON_ERROR_STOP=1 -U postgres
+}
+
+
 function user_initialization()
 {
     local raw_password
     local password
     local server_name
     local business_name
+    local business_user
+    local dbname
+
+    server_name=$1
+    business_name=${server_name//-/}
+    business_user="dbuser_${business_name}"
+    dbname="putong-${server_name}"
+
+    if [ -f "${USERINFO_FILE}" ] \
+        && psql -U postgres -AXtqc "SELECT 1 FROM pg_database WHERE datname = '${dbname}';" | grep -q '^1$' \
+        && psql -U postgres -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = '${business_user}';" | grep -q '^1$'; then
+        echo_log "user_init: ${dbname} and ${business_user} already exist, reuse ${USERINFO_FILE}."
+        password=$(awk '{print $2}' "${USERINFO_FILE}" | awk -F':' '{print $2}')
+        echo_success "{'username':${business_user}, 'password':${password}}"
+        return 0
+    fi
 
     raw_password=$(pwgen -cnCy 16 -1)
     password=${raw_password//:/?}
@@ -89,63 +132,64 @@ function user_initialization()
     password=${password//!/?}
     password=${password//\'/?}
     password=${password//\"/?}
-    server_name=$1
-    business_name=${server_name//-/}
 
-    psql -v ON_ERROR_STOP=1 -U postgres <<EOF
-    SET password_encryption = 'scram-sha-256';
-    CREATE ROLE dbrole_offline;
-    ALTER ROLE dbrole_offline WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;
-    CREATE ROLE dbrole_readonly;
-    ALTER ROLE dbrole_readonly WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;
-    CREATE ROLE dbrole_readwrite;
-    ALTER ROLE dbrole_readwrite WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;
-    CREATE ROLE dbrole_readwrite_with_delete;
-    ALTER ROLE dbrole_readwrite_with_delete WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;
-    CREATE ROLE dbrole_sa;
-    ALTER ROLE dbrole_sa WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;
-    CREATE ROLE dbuser_dba;
-    ALTER ROLE dbuser_dba WITH SUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS PASSWORD '${DBA_PASSWORD}';
-    CREATE ROLE replication;
-    ALTER ROLE replication WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS PASSWORD '${REPLICATION_PASSWORD}';
-    GRANT dbrole_readonly TO dbrole_offline GRANTED BY postgres;
-    GRANT dbrole_readwrite TO dbrole_readwrite_with_delete GRANTED BY postgres;
-    GRANT dbrole_sa TO dbuser_dba GRANTED BY postgres;
-    CREATE DATABASE "putong-${server_name}";
-EOF
+    ensure_role dbrole_offline               "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
+    ensure_role dbrole_readonly              "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
+    ensure_role dbrole_readwrite             "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
+    ensure_role dbrole_readwrite_with_delete "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
+    ensure_role dbrole_sa                    "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
+    ensure_role dbuser_dba                   "WITH SUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS PASSWORD '${DBA_PASSWORD}'"
+    ensure_role replication                  "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS PASSWORD '${REPLICATION_PASSWORD}'"
 
-    psql -v ON_ERROR_STOP=1 -U postgres -d "putong-${server_name}" <<EOF
-    SET password_encryption = 'scram-sha-256';
-    CREATE SCHEMA yay;
-    CREATE TABLE yay.init_result_check_table
-    (
+    psql -v ON_ERROR_STOP=1 -U postgres <<SQL
+SET password_encryption = 'scram-sha-256';
+GRANT dbrole_readonly TO dbrole_offline GRANTED BY postgres;
+GRANT dbrole_readwrite TO dbrole_readwrite_with_delete GRANTED BY postgres;
+GRANT dbrole_sa TO dbuser_dba GRANTED BY postgres;
+SQL
+
+    ensure_database "${dbname}"
+
+    psql -v ON_ERROR_STOP=1 -U postgres -d "${dbname}" <<SQL
+SET password_encryption = 'scram-sha-256';
+CREATE SCHEMA IF NOT EXISTS yay;
+CREATE TABLE IF NOT EXISTS yay.init_result_check_table
+(
     id bigserial NOT NULL,
     check_result varchar(64),
     created_time timestamp without time zone NOT NULL DEFAULT timezone('UTC'::text, now()) NOT NULL,
     PRIMARY KEY (id)
-    );
-    GRANT USAGE ON SCHEMA yay TO GROUP dbrole_readonly,dbrole_readwrite;
-    GRANT SELECT ON ALL TABLES IN SCHEMA yay TO GROUP dbrole_readonly;
-    GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA yay TO GROUP dbrole_readwrite;
-    GRANT DELETE ON ALL TABLES IN SCHEMA yay TO GROUP dbrole_readwrite_with_delete;
-    GRANT SELECT ON ALL SEQUENCES IN SCHEMA yay TO dbrole_readonly;
-    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA yay TO dbrole_readwrite;
-    GRANT ALL ON ALL FUNCTIONS IN SCHEMA yay TO dbrole_readonly;
-    GRANT ALL ON ALL FUNCTIONS IN SCHEMA yay TO dbrole_readwrite;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT SELECT ON TABLES TO dbrole_readonly;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT SELECT,INSERT,UPDATE ON TABLES TO dbrole_readwrite;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT DELETE ON TABLES TO dbrole_readwrite_with_delete;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT SELECT ON SEQUENCES TO dbrole_readonly;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT ALL ON SEQUENCES TO dbrole_readwrite;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT ALL ON FUNCTIONS TO dbrole_readonly;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT ALL ON FUNCTIONS TO dbrole_readwrite;
-    GRANT CONNECT ON DATABASE "putong-${server_name}" TO GROUP dbrole_readonly,dbrole_readwrite;
-    CREATE USER dbuser_${business_name} PASSWORD '${password}' IN ROLE dbrole_readwrite_with_delete;
-    GRANT dbrole_readwrite_with_delete TO dbuser_${business_name} GRANTED BY postgres;
-EOF
+);
+GRANT USAGE ON SCHEMA yay TO GROUP dbrole_readonly,dbrole_readwrite;
+GRANT SELECT ON ALL TABLES IN SCHEMA yay TO GROUP dbrole_readonly;
+GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA yay TO GROUP dbrole_readwrite;
+GRANT DELETE ON ALL TABLES IN SCHEMA yay TO GROUP dbrole_readwrite_with_delete;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA yay TO dbrole_readonly;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA yay TO dbrole_readwrite;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA yay TO dbrole_readonly;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA yay TO dbrole_readwrite;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT SELECT ON TABLES TO dbrole_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT SELECT,INSERT,UPDATE ON TABLES TO dbrole_readwrite;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT DELETE ON TABLES TO dbrole_readwrite_with_delete;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT SELECT ON SEQUENCES TO dbrole_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT ALL ON SEQUENCES TO dbrole_readwrite;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT ALL ON FUNCTIONS TO dbrole_readonly;
+ALTER DEFAULT PRIVILEGES IN SCHEMA yay GRANT ALL ON FUNCTIONS TO dbrole_readwrite;
+GRANT CONNECT ON DATABASE "${dbname}" TO GROUP dbrole_readonly,dbrole_readwrite;
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${business_user}') THEN
+        CREATE USER "${business_user}" PASSWORD '${password}' IN ROLE dbrole_readwrite_with_delete;
+    END IF;
+END
+\$\$;
+GRANT dbrole_readwrite_with_delete TO "${business_user}" GRANTED BY postgres;
+SQL
 
-    echo "username:dbuser_${business_name}  password:${password}" > /home/postgres/.userinfo.conf
-    echo_success "{'username':dbuser_${business_name}, 'password':${password}}"
+    echo "username:${business_user}  password:${password}" > "${USERINFO_FILE}"
+    chown postgres:postgres "${USERINFO_FILE}" 2>/dev/null || true
+    chmod 0600 "${USERINFO_FILE}" 2>/dev/null || true
+    echo_success "{'username':${business_user}, 'password':${password}}"
 }
 
 
