@@ -10,4 +10,4 @@
   tasks:
    - name: 针对单独存在 offline 实例的集群进行 slave 的pg_hba.conf配置校准
      template: src=../templates/postgresql_initialize/pg_hba.conf.offline.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
-     when:  groups.offline | length == 0
+     when: (groups.offline | default([])) | length > 0
