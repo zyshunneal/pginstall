@@ -179,13 +179,16 @@ GRANT CONNECT ON DATABASE "${dbname}" TO GROUP dbrole_readonly,dbrole_readwrite;
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${business_user}') THEN
-        CREATE USER "${business_user}" PASSWORD '${password}' IN ROLE dbrole_readwrite_with_delete;
+        CREATE USER "${business_user}" IN ROLE dbrole_readwrite_with_delete;
     END IF;
 END
 \$\$;
+ALTER USER "${business_user}" WITH PASSWORD '${password}';
 GRANT dbrole_readwrite_with_delete TO "${business_user}" GRANTED BY postgres;
 SQL
 
+    install -d -o postgres -g postgres -m 0755 "$(dirname "${USERINFO_FILE}")" 2>/dev/null \
+        || mkdir -p "$(dirname "${USERINFO_FILE}")"
     echo "username:${business_user}  password:${password}" > "${USERINFO_FILE}"
     chown postgres:postgres "${USERINFO_FILE}" 2>/dev/null || true
     chmod 0600 "${USERINFO_FILE}" 2>/dev/null || true

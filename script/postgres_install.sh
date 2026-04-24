@@ -138,7 +138,9 @@ ensure_locale() {
 
 
 ensure_postgres_user() {
-    return
+    if id postgres >/dev/null 2>&1; then
+        install -d -o postgres -g postgres -m 0755 /home/postgres
+    fi
 }
 
 
