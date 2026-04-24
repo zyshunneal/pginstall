@@ -1,0 +1,12 @@
+#!/usr/bin/ansible-playbook
+---
+- name: test
+  hosts: all
+  gather_facts: false
+  serial: 10
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo 
+  tasks:
+     - name: copy repack script to master
+       debug: msg="{{ group_names }}"

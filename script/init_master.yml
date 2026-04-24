@@ -1,0 +1,96 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 三、主库 postgresql,pgbouncer 标准初始化操作
+  hosts: master
+  gather_facts: true
+  serial: 1
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+   - name: 初始化postgresql实例数据目录
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/initdb  -D /pg/data/
+
+   - name: 修改 目录 权限
+     shell: "mkdir -p /var/run/postgresql && chown -R  postgres.postgres /var/run/postgresql"
+
+   - name: 启动数据库
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /pg/data/ start 
+
+   - name: database、default yay schema and user 初始化
+     script: "./user_init.sh -S {{ servername }}"
+
+   - name: 获取业务用户的用户名
+     shell: cat /home/postgres/.userinfo.conf | awk {'print $1'} | awk -F':' {'print $2'}
+     register: business_user_name
+
+   - name: 获取业务用户的密码
+     shell: cat /home/postgres/.userinfo.conf | awk {'print $2'} | awk -F':' {'print $2'}
+     register: business_user_passswd
+
+   - name: 注册变量保存业务用户名和密码
+     set_fact:
+          username: "{{ business_user_name.stdout }}"
+          password: "{{ business_user_passswd.stdout }}"
+
+   - name: 拷贝标准化pg_hba文件
+     copy: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+
+   - name: 拷贝标准化postgrsql.conf文件
+     copy: src=../templates/postgresql_initialize/postgresql.conf.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     when: ansible_memtotal_mb > 200000 and (pgversion | int) < 12
+
+   - name: 拷贝标准化postgrsql.conf文件
+     copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     when: ansible_memtotal_mb > 200000 and (pgversion | int) >= 12
+
+   - name: 拷贝标准化postgrsql.conf测试文件
+     copy: src=../templates/postgresql_initialize/postgresql.conf.test.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     when: ansible_memtotal_mb < 200000 and (pgversion | int) < 12
+
+   - name: 拷贝标准化postgrsql.conf测试文件
+     copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     when: ansible_memtotal_mb < 200000 and (pgversion | int) >= 12
+
+   - name: 获取md5 值的业务用户密码
+     shell: psql -U postgres  -AXtqc "select rolpassword from pg_authid where rolname='{{ username }}' "
+     register: user_password
+     
+   - name: 注册变量保存业务用户密码的md5值和服务名称
+     set_fact:
+         md5_password: "{{ user_password.stdout }}"
+         servername: "{{ servername }}"
+
+   - name: 模板构建pgbouncer的 pgb_hba.conf 配置文件
+     template: src=../templates/pgbouncer_initialize/pgb_hba.conf.j2 dest=/etc/pgbouncer/pgb_hba.conf force=yes backup=yes owner=pgbouncer  group=pgbouncer
+
+   - name: 模板构建 pgbouncer 的 pgbouncer.ini 配置文件
+     template: src=../templates/pgbouncer_initialize/pgbouncer.ini.j2 dest=/etc/pgbouncer/pgbouncer.ini  force=yes backup=yes owner=pgbouncer  group=pgbouncer
+
+   - name: 模板构建 pgbouncer 的 userlist.txt 配置文件
+     template: src=../templates/pgbouncer_initialize/userlist.txt.j2 dest=/etc/pgbouncer/userlist.txt  force=yes backup=yes owner=pgbouncer  group=pgbouncer mode=0600
+
+   - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
+     shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
+
+   - name: 重启postgresql,使6、7步传入的配置文件生效
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl  -D /pg/data/ restart -t 3600
+
+   - name: 启动 pgbouncer
+     become: yes
+     become_method: sudo
+     become_user: pgbouncer
+     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini 
+
+   - name: 主库初始化最后一步，验证用户连通性
+     shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
+     register: check_connresult

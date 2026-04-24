@@ -1,0 +1,13 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 五、对存在offline从库的集群进行slave的pg_hba校准
+  hosts: slave
+  gather_facts: false
+  serial: 20
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+   - name: 针对单独存在 offline 实例的集群进行 slave 的pg_hba.conf配置校准
+     template: src=../templates/postgresql_initialize/pg_hba.conf.offline.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     when:  groups.offline | length == 0

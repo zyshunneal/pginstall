@@ -1,0 +1,17 @@
+[Unit]
+Description=Prometheus Shannon Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart={{ monitor_bin_dir }}/shannon_exporter --web.listen-address=:9101 --web.telemetry-path=/debug/metrics
+Restart=always
+RestartSec=5
+LimitNOFILE=102400
+LimitNPROC=20480
+
+[Install]
+WantedBy=multi-user.target

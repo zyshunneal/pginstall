@@ -1,0 +1,8 @@
+#vacuum and repack crontab 
+SHELL=/bin/bash
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+HOME=/
+
+00 03 * * *  postgres  /pg/bin/repack.sh 2>> /pg/tlog/repack.log
+30 04 * * *  postgres  /pg/bin/vacuum.sh 2>> /pg/tlog/vacuum.log
+

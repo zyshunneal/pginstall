@@ -1,0 +1,39 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 六、重启offline和slave实例并配置pgbouncer
+  hosts: all
+  gather_facts: false
+  serial: 20
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+   - name: 重启offline和slave实例
+     shell: su - postgres -c "chmod 0700 /pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data restart -t 3600"
+     when: inventory_hostname != groups["master"][0]
+
+   - name: 获取主库的所有pgbouncer的配置文件到本地
+     fetch: "src=/etc/pgbouncer/{{ item }} dest=~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template  flat=yes"
+     with_items:
+      - pgbouncer.ini
+      - userlist.txt
+      - pgb_hba.conf
+     when: inventory_hostname == groups["master"][0]
+
+   - name: 拷贝主库pgbouncer配置文件到offline和slave实例上
+     copy: src=~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template  dest=/etc/pgbouncer/{{ item }} force=yes backup=yes owner=pgbouncer group=pgbouncer
+     with_items:
+      - pgbouncer.ini
+      - userlist.txt
+      - pgb_hba.conf
+     when: inventory_hostname != groups["master"][0]
+
+   - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
+     shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
+     when: inventory_hostname != groups["master"][0]
+
+   - name: 启动offline和slave的pgbouncer
+     become: yes
+     become_method: sudo
+     become_user: pgbouncer
+     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini

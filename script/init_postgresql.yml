@@ -1,0 +1,38 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 二、调用软件安装脚本完成软件安装
+  hosts: all
+  gather_facts: false
+  serial: 10
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+    - name: 安装指定版本的 postgresql 软件
+      script: "./postgres_install.sh  -V {{ pgversion }}  -S {{ servername }} 2>/tmp/postgres_install.log"
+      async: 0
+
+   # - name: 重启机器关闭numa
+   #   shell: reboot
+   #   async: 10
+   #   poll: 0
+
+   # - name: 等待机器重启完成，此处会等待10分钟，预计10分钟机器一定可以重启完成
+   #   local_action:
+   #        module: wait_for
+   #        host: 127.0.0.1
+   #        port: 22
+   #        delay: 600
+   #        timeout: 3600
+   #        state: started
+   # 
+    - name: check机器重启结果，如果有未能10分钟重启完成的则退出执行，需要人工check
+      action: ping
+
+    - name: 获取numa设置
+      shell: numactl  --hardware | grep cpus | grep -v grep  | wc -l
+      register: numa_stat
+
+    - name: check numa设置情况，如果开启了numa 则不进行接下来的安装工作
+      shell: "echo 'OS Open numa，so exit cluster init ' | exit 1"
+      when: numa_stat.stdout | int != 1

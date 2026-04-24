@@ -1,0 +1,36 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 测试环境一键清理
+  hosts: all
+  gather_facts: false
+  serial: 10
+  ignore_errors: yes
+  become: yes
+  become_method: sudo
+  tasks:
+     - name: 连通性测试
+       action: ping
+
+     - name: 清理之前 需要进行再次确认
+       pause: prompt="将开始清理所有数据和环境 Press return to continue. Press Ctrl+c and then a to abort"
+
+     - name: stop postgresql
+       become: yes
+       become_method: sudo
+       become_user: postgres
+       shell: /usr/pgsql/bin/pg_ctl -D /pg/data stop || true
+
+     - block:
+       - shell: cd /data && rm -rf postgresql 
+       - shell: cd /export && rm -rf postgresql 
+       - shell: cd / && rm -rf pg
+       - shell: test -f /var/run/pgbouncer/pgbouncer.pid && kill -9 $(cat /var/run/pgbouncer/pgbouncer.pid) || true
+       - shell: cd /etc/pgbouncer && rm -rf *
+       - shell: |
+           if command -v apt-get >/dev/null 2>&1; then
+             dpkg -l | awk '/^ii/ && $2 ~ /^(postgresql|postgresql-client|postgresql-common|postgresql-client-common|pgbouncer|pgpool2|postgis)/ {print $2}' \
+               | xargs -r apt-get purge -y
+             apt-get autoremove -y
+           else
+             rpm -qa | grep 'postgre\|pgpool\|pg_top\|postgis\|pg_repack\|pgbouncer\|pgdg' | xargs yum remove -y
+           fi

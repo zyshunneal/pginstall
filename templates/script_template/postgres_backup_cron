@@ -1,0 +1,6 @@
+#backup cron 
+SHELL=/bin/bash
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+HOME=/
+
+0 1 * * *  postgres cd /pg/bin; sh pg_backup.sh 1>> /pg/tlog/pg_backup.log 2>&1

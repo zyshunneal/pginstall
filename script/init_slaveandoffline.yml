@@ -1,0 +1,59 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 四、开始构建集群slave 和 offline 的Postgresql环境"
+  hosts: all
+  gather_facts: false
+  serial: 20
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+   - name: set fact
+     set_fact:
+         version: "{{ pgversion }}"
+   - name: 拷贝pgpass文件到机器的对应目录下，用于构建主从关系
+     copy: "src=../templates/postgresql_initialize/pgpass  dest=/home/postgres/.pgpass force=yes backup=yes owner=postgres  group=postgres  mode=0600 "
+
+   - name: 构建slave 到 master 的主从关系
+     become: yes
+     become_method: sudo
+     become_user: postgres 
+     shell: /usr/pgsql/bin/pg_basebackup -D /pg/data   -Fp -Xs -R -v -P -h {{ groups['master'][0] }} -p 5432 -U replication -c fast
+     async: 0
+     when: inventory_hostname in  groups['slave']
+
+   - name: 针对11版本 增加 recovery_target_timeline 到 recovery.conf
+     lineinfile:
+          dest: /pg/data/recovery.conf
+          line: "recovery_target_timeline = 'latest'"
+     when: inventory_hostname in  groups['slave'] and  version  == '11'
+
+   - name: 将 slave  的pg_hba.conf标准配置copy到slave上
+     template: src=../templates/postgresql_initialize/pg_hba.conf.slave.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     when: inventory_hostname in  groups['slave']
+
+   - name: 启动 salve 实例
+     shell: su - postgres -c "chmod 0700 /pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data start -t 3600"
+     when: inventory_hostname in  groups['slave']
+
+   - name: 构建offline 到 某个 slave  的主从关系
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_basebackup -D /pg/data   -Fp -Xs -R -v -P -h {{ groups['slave'][0] }} -p 5432 -U replication -c fast
+     async: 0
+     when: inventory_hostname in  groups['offline']
+
+   - name: 针对11版本 增加 recovery_target_timeline 到 recovery.conf
+     lineinfile:
+          dest: /pg/data/recovery.conf
+          line: "recovery_target_timeline = 'latest'"
+     when: inventory_hostname in  groups['offline'] and  version  == '11'
+
+   - name: 将 offline  的pg_hba.conf标准配置copy到offline上
+     template: src=../templates/postgresql_initialize/pg_hba.conf.offline.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     when: inventory_hostname in  groups['offline']
+
+   - name: 启动 offline 实例
+     shell: su - postgres -c "chmod 0700 /pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /pg/data start -t 3600"
+     when: inventory_hostname in  groups['offline']

@@ -1,0 +1,27 @@
+#!/usr/bin/ansible-playbook
+---
+- import_playbook: init_prepare.yml
+  tags: prepare check
+- import_playbook: init_postgresql.yml
+  tags: install postgresql
+- import_playbook: init_master.yml
+  tags: init master
+- import_playbook: init_slaveandoffline.yml
+  tags: init slave
+- import_playbook: reset_pghba.yml
+  tags: reset pghba
+- import_playbook: start_slave_and_pgbouncer.yml
+  tags: start slave
+- import_playbook: postf_check.yml
+  tags: postf check
+- import_playbook: deploy_cron.yml
+  tags: deploy cron
+- import_playbook: deploy_monitor.yml
+  tags: deploy monitor
+
+
+
+
+
+
+

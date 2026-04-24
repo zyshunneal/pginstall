@@ -1,0 +1,18 @@
+[Unit]
+Description=Prometheus PostgreSQL Exporter
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+Environment="DATA_SOURCE_NAME=user=postgres host=/var/run/postgresql port=5432 dbname=postgres sslmode=disable"
+ExecStart=/usr/bin/prometheus-postgres-exporter --web.listen-address=:9185 --extend.query-path={{ monitor_bin_dir }}/queries.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=102400
+LimitNPROC=20480
+
+[Install]
+WantedBy=multi-user.target

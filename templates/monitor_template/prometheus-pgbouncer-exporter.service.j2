@@ -1,0 +1,20 @@
+[Unit]
+Description=Prometheus PgBouncer Exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment="DATA_SOURCE_NAME=host=127.0.0.1 port=6432 user=stats password=Gah4Oo+h3Cae6ahd sslmode=disable dbname=pgbouncer"
+Environment=PGB_EXPORTER_WEB_LISTEN_ADDRESS=:9127
+Environment=PGB_EXPORTER_WEB_TELEMETRY_PATH=/debug/metrics
+ExecStart={{ monitor_bin_dir }}/pgbouncer_exporter
+Restart=always
+RestartSec=5
+LimitNOFILE=102400
+LimitNPROC=20480
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,5 @@
+#!/bin/sh
+exec 2>&1
+ulimit -n 102400
+ulimit -u 20480
+exec "chpst" "-u" "root" "/usr/local/yay/bin/shannon_exporter" "--web.listen-address"=":9101" "--web.telemetry-path"="/debug/metrics"

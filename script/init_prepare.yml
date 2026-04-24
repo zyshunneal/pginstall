@@ -1,0 +1,19 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 一、自动化安装Postgresql前置检查
+  hosts: all
+  gather_facts: false
+  serial: 10
+  any_errors_fatal: true
+  become: yes
+  become_method: sudo
+  tasks:
+    - name: 连通性测试，如果机器无法远程连接，那么所有操作都不可进行，此为第一前提条件
+      action: ping
+
+    - name: check机器上是否有已经启动的postgresql，如果有已启动的PG则退出，否则可能造成问题，此为边界条件
+      shell: "ps aux | grep -v grep | grep 'postgres -D'  && exit 1 || exit 0"
+
+    - name: 确认指定的主机文件中有并只有一个主库,否则退出，集群构建过程中只能有一个主库，否则无法确认拓扑结构
+      shell: "echo 'master greater then 1, list: {{ groups.master }}' && exit 1"
+      when: groups.master|length != 1

@@ -1,0 +1,285 @@
+#!/bin/bash
+
+#Author: 
+#Date:
+#Description:
+#Usage:
+############################################################# 功能函数 Begin ##################################################################
+    #显示消息
+    #showType='errSysMsg/errSys/errUserMsg/warning/msg/msg2/OK'
+    #错误输出（以红色字体输出） errSysMsg：捕捉系统错误后发现相信并退出；errSys：捕捉到系统错误后退出；errUserMsg：自定义错误并退出，但不退出（errSysMsg及errUserMsg可以赋第三个参数isExit为非1来控制不退出）
+    #警告（以黄色字体输出）  warning：显示warning，但不退出
+    #显示信息（以白色字体输出，OK以绿色输出） msg：输出信息并换行；msg2：输出信息不换行；OK：输出绿色OK并换行
+    function showMsg()
+    {
+    errState="$?"
+        local showType="$1"
+        local showContent="$2"
+        local isExit="$3"
+        #如果isExit为空，则默认出错时该退出
+        if [ "${isExit}" = "" ]; then
+            isExit=1
+        fi
+        showType=`echo ${showType} | tr 'A-Z' 'a-z'`
+        case "${showType}" in
+            errsysmsg)
+                if [ "${errState}" -ne 0 ]; then
+                    echo -e "\033[31;49;1m[`date +%F' '%T`] Error: ${showContent}\033[39;49;0m" | tee -a ${logFile} >&2
+                    echo -e "\033[31;49;1m[`date +%F' '%T`] Call Relation: bash${pid}\033[39;49;0m" | tee -a ${logFile} >&2
+                    if [ "${isExit}" -eq 1 ]; then
+                        exit 1
+                    fi
+                fi
+            ;;
+            errsys)
+                if [ "$errState" -ne 0 ]; then
+                    exit 1
+                fi
+            ;;
+            errusermsg)
+                echo -e "\033[31;49;1m[`date +%F' '%T`]  Error: ${showContent}\033[39;49;0m"  | tee -a ${logFile} >&2
+                echo -e "\033[31;49;1m[`date +%F' '%T`] Call Relation: bash${pid}\033[39;49;0m" | tee -a ${logFile} >&2
+                if [ "${isExit}" -eq 1 ]; then
+                    exit 1
+                fi
+            ;;
+            warning)
+                echo -e "\033[33;49;1m[`date +%F' '%T`]  Warnning: ${showContent}\033[39;49;0m"  | tee -a ${logFile}
+                echo -e "\033[33;49;1m[`date +%F' '%T`] Call Relation: bash${pid}\033[39;49;0m"  | tee -a ${logFile}
+            ;;
+            msg)
+                echo "[`date +%F' '%T`]  ${showContent}" | tee -a ${logFile}
+            ;;
+            msg2)
+                echo -n "[`date +%F' '%T`]  ${showContent}" | tee -a ${logFile}
+            ;;
+            ok)
+                echo "OK" >> ${logFile}
+                echo -e "\033[32;49;1mOK\033[39;49;0m" 
+            ;;
+            *)
+                echo -e "\033[31;49;1m[`date +%F' '%T`] Error: Call founction showMsg error\033[39;49;0m"  | tee -a ${logFile}
+                exit 1
+            ;;
+        esac
+    }
+    #执行sql语句
+    function executeSql()
+    {
+        local sql="$1"
+        if [ -z "$pgHost" -o "$pgHost" = "" -o -z "$pgPort" -o "$pgPort" = "" -o -z "$pgDB" -o "$pgDB" = "" -o -z "$pgUser" -o "$pgUser" = "" ]; then
+            showMsg "errUserMsg" "pg host or port or db or user or pwd is not vaild."
+        fi
+        if [ "$sql" = "" ]
+        then
+            showMsg "errUserMsg" "sql statement is null "
+        else
+            psql -h $pgHost -p $pgPort -d $pgDB -U $pgUser -t -A -F '|' -c "$sql"
+        fi
+    }
+
+    #取得本机内网IP
+    function getIP()
+    {
+        local localip=$(ifconfig | grep inet | grep 10 | grep -v '127.0.0.1' | grep -v inet6 | awk '{print $2}' | tr -d "addr:")
+        showMsg "errsysmsg" "fail to execute getIP"
+        echo ${localip}
+    }
+
+    #取得本机外网ip（如有多个，则以tab键分隔）
+    function getLocaltOuterIP()
+    {
+        innerIP=`getLocalInnerIP`
+        if [ "${innerIP}" = "" ]; then
+            ifconfig | grep -E "(2[0-4][0-9]|25[0-5]|1[0-9][0-9]|[1-9]?[0-9])(\.(2[0-4][0-9]|25[0-5]|1[0-9][0-9]|[1-9]?[0-9])){3}" | awk -F":" '{print $2}' | awk '{print $1}' | grep -vE "127.0.0.1" | sed -e ':a;N;$ s/\n/\t/g;ba'
+        else
+            ifconfig | grep -E "(2[0-4][0-9]|25[0-5]|1[0-9][0-9]|[1-9]?[0-9])(\.(2[0-4][0-9]|25[0-5]|1[0-9][0-9]|[1-9]?[0-9])){3}" | awk -F":" '{print $2}' | awk '{print $1}' | grep -vE "127.0.0.1|${innerIP}" | sed -e ':a;N;$ s/\n/\t/g;ba'
+        fi
+    }
+
+    #检查指定文件是否存在
+    function checkFileExist()
+    {
+        theFileName="$1"
+        if [ ! -f $theFileName ]; then
+            showMsg "errUserMsg" "The file '$theFileName' is not exist."
+        fi
+    }
+
+    #检查变量是否存在
+    function checkVar()
+    {
+        local theVar="$1"
+        local theVar2="$2"
+        if [ "${theVar2}" = "" ]; then
+            showMsg "errUserMsg" "The var '${theVar}' is not invalidation."
+        fi
+    }
+############################################################# 功能函数 End ####################################################################
+
+function shellInit()
+{
+    sid=`basename $0`
+    export pid="${pid}-->$sid"
+    theFiledir=`echo $(cd "$(dirname "$0")"; pwd)`
+    cd ${theFiledir}
+    #默认日志文件为“本文件名.log”，如main函数有传入logFile参数（如不带路径则为当前目录），则以传入的日志文件名为准
+    theFileName=`basename $0 | awk -F"." '{print $1}'`
+    if [ "${logFile}" = "" ]; then
+        logFile="${theFileName}.log"
+    fi
+    logFilePath=`dirname ${logFile}`
+    if [ "${logFilePath}" = '.' ]; then
+        logFilePath=${theFiledir}
+    fi
+    logFileName=`basename ${logFile}`
+    logFile="${logFilePath}/${logFileName}"
+    mkdir -p ${logFilePath}
+    touch ${logFile}
+    #退出/中止（包括导常退出）脚本时执行的命令
+    #trapCmd="rm -f ~/.pgpass"
+    #trap 'eval ${trapCmd}' EXIT
+    #--------以上为框架规定，建议不要做修改----------
+
+    #--------全局变量社区区域---------
+    export PATH=${PATH}:/usr/local/bin:/sbin:/usr/pgsql/bin
+
+    META_URL="postgres://backup_info:backupinfo@10.189.0.40:5432/putong-meta"
+    META_ID=0
+
+    BACKUP_URL="postgres://replication:@127.0.0.1:5432/postgres"
+    BACKUP_DIR="/var/backups/backup"
+    BACKUP_TAG="{{ servername }}db"
+    BACKUP_FILE="backup_${BACKUP_TAG}_$(date +%Y%m%d).tar.lz4"
+    BACKUP_UPLOAD="0"
+    BACKUP_RM_AGO=1200      #1200分钟（20小时之前的备份删除）
+    
+}
+#使用说明
+function usage()
+{
+    parameter="$1"
+    myFileName=`basename $0`
+    if [ "${parameter}" = '--help'  -o  "${parameter}" = '-h' ]; then
+        echo "Usage:  sh ${myFileName} [logFile] "
+        exit 1
+    fi
+}
+
+function bak_begin()
+{
+    showMsg "msg" "begin backup"
+    local ip=$(getIP)
+    local sql="insert into pg_backup_info(db_tag,bak_ip,bak_begin) values ('${BACKUP_TAG}', '${ip}', '$(date +%F' '%T)') returning id"
+    META_ID=$(psql ${META_URL} -Aqtc "${sql}")
+    showMsg 'errsysmsg' "fail to execute '${sql}'"
+    showMsg 'msg' "backup META_ID: ${META_ID}"
+}
+
+function bak_execute()
+{
+    local sql=''
+#decrypt        openssl enc -rc4 -d -k ${BACKUP_TAG} -in /${BACKUP_DIR}/${BACKUP_FILE} | unlz4 -c  | tar -xC ${DES_DIR}
+    pg_basebackup -d ${BACKUP_URL} -Xf -Ft -c fast -v -D -  \
+    | lz4 -q -z \
+    | openssl enc -rc4 -k ${BACKUP_TAG} > /${BACKUP_DIR}/${BACKUP_FILE}
+    if [ ${PIPESTATUS[0]} -ne 0 -o ${PIPESTATUS[1]} -ne 0 -o ${PIPESTATUS[2]} -ne 0 ]
+    then
+        sql="update pg_backup_info set bak_success = false where id = ${META_ID}"
+        psql ${META_URL} -Aqtc "${sql}"
+        showMsg 'errsysmsg' "fail to execute '${sql}'"
+
+        showMsg "errusermsg" "fail to execute 'pg_basebackup'"
+    fi
+    showMsg "msg" "success to execute 'pg_basebackup'"
+
+    sql="update pg_backup_info set bak_success = true where id = ${META_ID}"
+    psql ${META_URL} -Aqtc "${sql}"
+    showMsg 'errsysmsg' "fail to execute '${sql}'"
+
+}
+
+function bak_upload()
+{
+    showMsg "msg" "BACKUP_UPLOAD: ${BACKUP_UPLOAD}"
+    local sql=""
+    if [ "${BACKUP_UPLOAD}" = "0" ]
+    then
+        sql="update pg_backup_info set bak_upload = false where id = ${META_ID}"
+        psql ${META_URL} -Aqtc "${sql}"
+        showMsg 'errsysmsg' "fail to execute '${sql}'"
+        return
+    fi
+
+    filemgr -action mput -speedlimit 104857600 -bucket postgresql-backup \
+    -key ${BACKUP_FILE} -file /${BACKUP_DIR}/${BACKUP_FILE} -trycontinue 1> /dev/null
+    if [ $? -ne 0 ]
+    then
+        sql="update pg_backup_info set bak_upload = false where id = ${META_ID}"
+        psql ${META_URL} -Aqtc "${sql}"
+        showMsg 'errsysmsg' "fail to execute '${sql}'"
+
+        showMsg "errusermsg" "fail to execute 'ufile upload'"
+    fi
+    showMsg 'msg' "success to execute 'ufile upload'"
+
+    sql="update pg_backup_info set bak_upload = true where id = ${META_ID}"
+    psql ${META_URL} -Aqtc "${sql}"
+    showMsg 'errsysmsg' "fail to execute '${sql}'"
+}
+
+
+function bak_remove()
+{
+    local rm_files=$(find ${BACKUP_DIR} -maxdepth 1 -type f -name '*.lz4' -mmin +${BACKUP_RM_AGO})
+    local sql="update pg_backup_info set rm_bak = '${rm_files}' where id = ${META_ID}"
+    psql ${META_URL} -Aqtc "${sql}"
+    showMsg 'errsysmsg' "fail to execute '${sql}'"
+
+    rm -rf ${rm_files}
+    showMsg "msg" "success remove file: ${rm_files}"
+
+    if [ "${BACKUP_UPLOAD}" = "1" ]
+    then
+        for file in ${rm_files}
+        do
+            filemgr -action delete -bucket postgresql-backup -key $(basename ${file})
+            #showMsg "errsysmsg" "fail to 'filemgr -action delete -bucket postgresql-backup -key ${file}'"
+        done
+        showMsg 'msg' "success remove ufile file: ${rm_files}"
+    fi
+}
+
+
+
+function bak_end()
+{
+    local bak_size=$(du -sh /${BACKUP_DIR}/${BACKUP_FILE} | awk '{print $1}')
+    local bak_end=$(date +%F' '%T)
+    showMsg 'msg' "backup file size: ${bak_size}"
+
+    local sql="update pg_backup_info set bak_size = '${bak_size}', bak_end = '${bak_end}'  where id = ${META_ID}"
+    psql ${META_URL} -Aqtc "${sql}"
+    showMsg 'errsysmsg' "fail to execute '${sql}'"
+
+    showMsg "msg" "end backup"
+    showMsg 'ok'
+    showMsg 'ok'
+}
+
+
+
+#主函数
+function main()
+{
+    logFile="$1"
+    usage "$1"
+    shellInit
+############
+    bak_begin
+    bak_execute
+    bak_upload
+    bak_remove
+    bak_end
+}
+main "$1" "$2" "$3" "$4" "$5"

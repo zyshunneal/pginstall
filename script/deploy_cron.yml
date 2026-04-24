@@ -1,0 +1,29 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 八、部署定时任务脚本
+  hosts: all
+  gather_facts: false
+  serial: 1
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+     - name: copy repack 脚本到主库
+       template: src=../templates/script_template/repack.sh.j2 dest=/pg/bin/repack.sh  force=yes backup=no owner=postgres group=postgres mode=0755
+       when:  inventory_hostname == groups["master"][0]
+
+     - name: copy vocuum  脚本到主库
+       template: src=../templates/script_template/vacuum.sh.j2 dest=/pg/bin/vacuum.sh  force=yes backup=no owner=postgres group=postgres mode=0755
+       when:  inventory_hostname == groups["master"][0]
+
+     - name: 设置 vacuum and repack 的cron 任务
+       copy: src=../templates/script_template/vacuum_and_repack_cron  dest=/etc/cron.d  force=yes backup=no owner=root group=root mode=0644
+       when:  inventory_hostname == groups["master"][0]
+
+     - name: copy backup 脚本到某个从库
+       template: src=../templates/script_template/pg_backup.sh.j2 dest=/pg/bin/pg_backup.sh   force=yes backup=no owner=postgres group=postgres mode=0755
+       when:  inventory_hostname == groups["slave"][0]
+
+     - name: 设置 backup 的 cron 任务
+       copy: src=../templates/script_template/postgres_backup_cron   dest=/etc/cron.d  force=yes backup=no owner=root group=root mode=0644
+       when:  inventory_hostname == groups["slave"][0]
