@@ -27,10 +27,6 @@
        - shell: test -f /var/run/pgbouncer/pgbouncer.pid && kill -9 $(cat /var/run/pgbouncer/pgbouncer.pid) || true
        - shell: cd /etc/pgbouncer && rm -rf *
        - shell: |
-           if command -v apt-get >/dev/null 2>&1; then
-             dpkg -l | awk '/^ii/ && $2 ~ /^(postgresql|postgresql-client|postgresql-common|postgresql-client-common|pgbouncer|pgpool2|postgis)/ {print $2}' \
-               | xargs -r apt-get purge -y
-             apt-get autoremove -y
-           else
-             rpm -qa | grep 'postgre\|pgpool\|pg_top\|postgis\|pg_repack\|pgbouncer\|pgdg' | xargs yum remove -y
-           fi
+           dpkg -l | awk '/^ii/ && $2 ~ /^(postgresql|postgresql-client|postgresql-common|postgresql-client-common|pgbouncer|pgpool2|postgis)/ {print $2}' \
+             | xargs -r apt-get purge -y
+           apt-get autoremove -y

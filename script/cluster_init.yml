@@ -14,11 +14,5 @@
   tags: start slave
 - import_playbook: postf_check.yml
   tags: postf check
-
-
-
-
-
-
-
-
+- import_playbook: deploy_cron.yml
+  tags: deploy cron

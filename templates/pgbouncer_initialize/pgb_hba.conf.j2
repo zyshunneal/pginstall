@@ -1,11 +1,8 @@
-local  pgbouncer stats                        md5
-host   pgbouncer stats         127.0.0.1/32   md5
-host   pgbouncer stats         0.0.0.0/0      md5
 ##########以后部分为权限系统的基础，建议不要改动##########
- 
-##########只有系统账号通过PGB登录，个人账号和stats账号直接登录数据库##########
+
+##########只有业务账号通过PGB登录##########
 ##########保留127.0.0.1/32。用于DBA配置时验证登录##########
-host   all          {{ username }}       127.0.0.1/32    md5
-host   all          {{ username }}       10.0.0.0/8      md5
+host   all          {{ username }}       127.0.0.1/32    scram-sha-256
+host   all          {{ username }}       10.0.0.0/8      scram-sha-256
  
 

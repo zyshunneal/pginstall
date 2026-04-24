@@ -11,18 +11,16 @@
     RESULT: "Database cluster initialization completed"
   tasks:
     - name: postgres 实例存活 CHECK
-      shell: "ps aux | grep -v grep | grep 'postgres -D'  && exit 0 || exit 1"
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      shell: /usr/pgsql/bin/pg_ctl -D /pg/data status
 
-    - name: postgres 核心进程 CHECK
-      shell: "ps -ef | grep -v grep | grep  -E 'stats collector'\\|'postgres: checkpointer'\\|'postgres: logger'\\|'postgres: background writer' | wc -l"
-      register: process_check_result
-
-    - name: 判断核心进程 CHECK 结果
-      debug: msg="postgres 核心进程 CHECK PASS"
-      when: process_check_result.stdout == '4'
+    - name: postgres readiness CHECK
+      shell: /usr/pgsql/bin/pg_isready -h 127.0.0.1 -p 5432
 
     - name: pgbouncer 实例存活 CHECK
-      shell: ps -ef | grep 'pgbouncer.ini' | grep -v grep  && exit 0 || exit 1
+      shell: ps -ef | grep 'pgbouncer.ini' | grep -v grep && exit 0 || exit 1
 
     - name: 获取业务用户的用户名
       shell: cat /home/postgres/.userinfo.conf | awk {'print $1'} | awk -F':' {'print $2'}
@@ -41,7 +39,7 @@
       when: inventory_hostname == groups["master"][0]
 
     - name: 主库验证用户连通性
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK'"
+      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d putong-{{ servername }} -AXtqc "select 'master instance install success ,check OK'"
       register: check_connresult
       when: inventory_hostname == groups["master"][0]
 
@@ -50,16 +48,11 @@
       when: inventory_hostname == groups["master"][0]
 
     - name: 业务用户write权限TEST
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "insert into init_result_check_table(check_result) values('ok')"
+      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d putong-{{ servername }} -AXtqc "insert into yay.init_result_check_table(check_result) values('ok')"
       when: inventory_hostname == groups["master"][0]
 
     - name: 业务用户read权限TEST
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select check_result from init_result_check_table"
-      when: inventory_hostname == groups["master"][0]
-      register: check_queryresult
-      
-    - name: 业务用户read权限TEST
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select check_result from init_result_check_table"
+      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d putong-{{ servername }} -AXtqc "select check_result from yay.init_result_check_table order by id desc limit 1"
       when: inventory_hostname == groups["master"][0]
       register: check_queryresult
 
@@ -67,18 +60,29 @@
       debug: msg="业务用户read权限测试结果PASS {{ check_queryresult.stdout }}"
       when: inventory_hostname == groups["master"][0]
 
-    - name: 检查主从复制情况
+    - name: 检查主库侧复制情况
       become: yes
       become_method: sudo
       become_user: postgres
-      shell:  psql -AXtqc 'select count(*) as repstat    from pg_stat_wal_receiver'
-      register: repli_result
+      shell: psql -AXtqc 'select count(*) from pg_stat_replication'
+      register: primary_replication_result
+      when: inventory_hostname == groups["master"][0] and (groups['slave'] | length > 0 or groups['offline'] | length > 0)
+
+    - name: 检查备库侧复制情况
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      shell: psql -AXtqc 'select count(*) as repstat from pg_stat_wal_receiver'
+      register: standby_replication_result
       when: inventory_hostname != groups["master"][0]
 
     - name: 主从复制CHECK结果
       debug: msg="集群主从复制状况情况OK"
-      when: inventory_hostname != groups["master"][0] and repli_result.stdout|int == 1
+      when: inventory_hostname != groups["master"][0] and standby_replication_result.stdout|int == 1
+
+    - name: 主库复制CHECK结果
+      debug: msg="主库复制连接检查OK {{ primary_replication_result.stdout }}"
+      when: inventory_hostname == groups["master"][0] and (groups['slave'] | length > 0 or groups['offline'] | length > 0) and primary_replication_result.stdout|int >= 1
 
     - name: 数据库集群初始化完成
       debug: msg="{{ RESULT }}"
-

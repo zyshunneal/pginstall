@@ -1,21 +1,19 @@
 #管理账号
-local   all   postgres       ident
-host    all   +dbrole_sa     10.9.50.127/32        md5
-host    all   +dbrole_sa     10.179.10.102/32      md5
-host    all   +dbrole_sa     10.179.3.240/32       md5
-#127.0.0.1(允许监控用户和系统用户通过PGB访问)
-host   all   dbuser_monitor                  127.0.0.1/32     md5
-host   all   +dbrole_readonly                127.0.0.1/32     md5
-host   all   +dbrole_readwrite               127.0.0.1/32     md5
-host   all   +dbrole_readwrite_with_delete   127.0.0.1/32     md5
+local   all   postgres       peer
+host    all   +dbrole_sa     10.9.50.127/32        scram-sha-256
+host    all   +dbrole_sa     10.179.10.102/32      scram-sha-256
+host    all   +dbrole_sa     10.179.3.240/32       scram-sha-256
+#127.0.0.1(允许系统用户通过PGB访问)
+host   all   +dbrole_readonly                127.0.0.1/32     scram-sha-256
+host   all   +dbrole_readwrite               127.0.0.1/32     scram-sha-256
+host   all   +dbrole_readwrite_with_delete   127.0.0.1/32     scram-sha-256
 #replication(允许本地备份复制和standby复制)
-host replication  replication    127.0.0.1/32        md5
-host replication  replication    10.189.0.0/16       md5
+host replication  replication    127.0.0.1/32        scram-sha-256
+host replication  replication    10.189.0.0/16       scram-sha-256
 #########以上部分为配置标准，每台PG实例都应这样配置#########
 #为测试需要添加的ip段
-host replication  replication    10.9.0.0/16       md5
+host replication  replication    10.9.0.0/16       scram-sha-256
  
 #########以下部分按照不同的PG实例角色来配置#########
 #(offline实例，允许offline组访问)
-host   all    +dbrole_offline     10.179.3.56/32     md5
-host   all    dbuser_stats        10.0.0.0/8         md5
+host   all    +dbrole_offline     10.179.3.56/32     scram-sha-256

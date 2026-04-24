@@ -5,7 +5,6 @@
 
 set -euo pipefail
 
-# User initialization script
 SCRIPT=$(readlink -f "$0")
 cd "$(dirname "$SCRIPT")"
 
@@ -20,6 +19,7 @@ echo_success() {
 EOF
 }
 
+
 echo_failure() {
     local rc=-1
     cat <<EOF
@@ -32,6 +32,7 @@ echo_failure() {
     }
 EOF
 }
+
 
 echo_log() {
     local timestamp
@@ -89,13 +90,32 @@ detect_os() {
         # shellcheck disable=SC1091
         . /etc/os-release
         OS_ID=${ID:-}
-        OS_FAMILY=${ID_LIKE:-}
         OS_VERSION_ID=${VERSION_ID:-}
         OS_CODENAME=${VERSION_CODENAME:-}
     else
         echo_failure "OS detect error" "/etc/os-release is missing"
         exit 1
     fi
+
+    if [ "${OS_ID}" != "debian" ] || [ "${OS_VERSION_ID}" != "12" ]; then
+        echo_failure "Unsupported operating system" "This project only supports Debian 12. Current system: ID=${OS_ID}, VERSION_ID=${OS_VERSION_ID}"
+        exit 1
+    fi
+}
+
+
+validate_pgversion() {
+    local major_version
+    major_version="${version%%.*}"
+
+    case "${major_version}" in
+        17|18)
+            ;;
+        *)
+            echo_failure "Unsupported PostgreSQL version" "Only PostgreSQL 17 and 18 are supported. Current version: ${version}"
+            exit 1
+            ;;
+    esac
 }
 
 
@@ -118,21 +138,7 @@ ensure_locale() {
 
 
 ensure_postgres_user() {
-    local osuser='postgres'
-
-    case "${OS_ID}" in
-        debian|ubuntu)
-            return
-            ;;
-    esac
-
-    if ! getent group "${osuser}" >/dev/null 2>&1; then
-        groupadd "${osuser}"
-    fi
-
-    if ! id -u "${osuser}" >/dev/null 2>&1; then
-        useradd -g "${osuser}" "${osuser}"
-    fi
+    return
 }
 
 
@@ -183,7 +189,7 @@ EOF
     if ! package_exists_apt "postgresql-${major_version}"; then
         echo_failure \
             "Debian package is unavailable" \
-            "postgresql-${major_version} is not available for Debian ${OS_VERSION_ID}. Use a package version that exists in the configured APT repositories."
+            "postgresql-${major_version} is not available for Debian ${OS_VERSION_ID}. Use PostgreSQL 17 or 18 from the configured APT repositories."
         exit 1
     fi
 
@@ -219,61 +225,8 @@ EOF
 }
 
 
-install_rhel_packages() {
-    local dbversion="$1"
-    local major_version="${dbversion%%.*}"
-    local short_version
-    short_version="$(echo "${dbversion}" | awk -F'.' '{print $1$2}')"
-
-    if grep -q 'CentOS release 6' /etc/redhat-release; then
-        rpm -qa | grep 'postgre\|pgpool\|pg_top\|postgis2_\|pg_repack\|pgbouncer\|pgdg' | xargs yum remove -y
-        rm -rf /etc/yum.repos.d/tpgsql-rhel6.repo
-        rm -rf /etc/yum.repos.d/tpgsql-rhel7.repo
-        yum clean all && yum install -q -y epel-release && wget 10.9.12.126:8080/repo/tpgsql-rhel6.repo -O /etc/yum.repos.d/tpgsql-rhel6.repo && yum update -y
-    elif grep -q 'CentOS Linux release 7' /etc/redhat-release; then
-        rpm -qa | grep 'postgre\|pgpool\|pg_top\|postgis2_\|pg_repack\|pgbouncer\|pgdg' | xargs yum remove -y
-        rm -rf /etc/yum.repos.d/tpgsql-rhel6.repo
-        rm -rf /etc/yum.repos.d/tpgsql-rhel7.repo
-        yum clean all && yum install -q -y epel-release && wget 10.9.12.126:8080/repo/tpgsql-rhel7.repo -O /etc/yum.repos.d/tpgsql-rhel7.repo && yum update -y
-    fi
-
-    if [ "${short_version}" != "12" ]; then
-        yum install -q -y tcl perl-ExtUtils-Embed libxml2 libxslt uuid readline lz4 nc numactl python34 python34-devel gcc unzip pwgen
-        yum install -q -y postgresql"${short_version}" postgresql"${short_version}"-libs postgresql"${short_version}"-server postgresql"${short_version}"-contrib postgresql"${short_version}"-devel postgresql"${short_version}"-debuginfo
-        yum install -q -y pgbouncer pgpool-II-"${short_version}" pg_top"${short_version}" postgis24_"${short_version}" postgis24_"${short_version}"-client pg_repack"${short_version}"
-    else
-        yum install -q -y tcl perl-ExtUtils-Embed libxml2 libxslt uuid readline lz4 nc python34 python34-devel gcc unzip pwgen
-        yum install -q -y postgresql"${short_version}" postgresql"${short_version}"-libs postgresql"${short_version}"-server postgresql"${short_version}"-contrib postgresql"${short_version}"-devel postgresql"${short_version}"-debuginfo
-        yum install -q -y pgbouncer pgpool-II-"${short_version}" pg_top"${short_version}" postgis30_"${short_version}" postgis30_"${short_version}"-client pg_repack"${short_version}"
-    fi
-
-    rm -f /usr/pgsql
-    ln -sf "/usr/pgsql-${major_version}" /usr/pgsql
-    echo 'export PATH=/usr/pgsql/bin:$PATH' > /etc/profile.d/pgsql.sh
-}
-
-
 pg_install() {
-    local dbversion="$1"
-
-    case "${OS_ID}" in
-        debian|ubuntu)
-            install_debian_packages "${dbversion}"
-            ;;
-        centos|rhel)
-            install_rhel_packages "${dbversion}"
-            ;;
-        *)
-            if echo "${OS_FAMILY}" | grep -qi 'debian'; then
-                install_debian_packages "${dbversion}"
-            elif echo "${OS_FAMILY}" | grep -Eqi 'rhel|fedora|centos'; then
-                install_rhel_packages "${dbversion}"
-            else
-                echo_failure "Unsupported operating system" "ID=${OS_ID}, ID_LIKE=${OS_FAMILY}"
-                exit 1
-            fi
-            ;;
-    esac
+    install_debian_packages "$1"
 }
 
 
@@ -313,13 +266,7 @@ ensure_kernel_args() {
 
         if command -v update-grub >/dev/null 2>&1; then
             update-grub
-        elif command -v grub2-mkconfig >/dev/null 2>&1 && [ -d /boot/grub2 ]; then
-            grub2-mkconfig -o /boot/grub2/grub.cfg
-        elif command -v grubby >/dev/null 2>&1; then
-            grubby --update-kernel="/boot/vmlinuz-$(uname -r)" --args="${args}"
         fi
-    elif command -v grubby >/dev/null 2>&1; then
-        grubby --update-kernel="/boot/vmlinuz-$(uname -r)" --args="${args}"
     fi
 }
 
@@ -449,6 +396,7 @@ EOF
 
 main() {
     detect_os
+    validate_pgversion
     ensure_postgres_user
     pg_install "${version}"
     dir_init

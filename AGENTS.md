@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is a flat Ansible project for PostgreSQL cluster bootstrap and post-deploy setup. Core playbooks live in `script/`, with `cluster_init.yml` orchestrating the full flow by importing `init_prepare.yml`, `init_postgresql.yml`, `init_master.yml`, `init_slaveandoffline.yml`, and follow-up deployment checks. Jinja templates are grouped under `templates/postgresql_initialize/`, `templates/pgbouncer_initialize/`, `templates/monitor_template/`, and `templates/script_template/`. Helper shell scripts such as `postgres_install.sh`, `user_init.sh`, and `renamehost.sh` also live in `script/`.
+This repository is a flat Ansible project for PostgreSQL cluster bootstrap and post-deploy setup. Core playbooks live in `script/`, with `cluster_init.yml` orchestrating the full flow by importing `init_prepare.yml`, `init_postgresql.yml`, `init_master.yml`, `init_slaveandoffline.yml`, and follow-up deployment checks. Jinja templates are grouped under `templates/postgresql_initialize/`, `templates/pgbouncer_initialize/`, and `templates/script_template/`. Helper shell scripts such as `postgres_install.sh`, `user_init.sh`, and `renamehost.sh` also live in `script/`.
 
 ## Build, Test, and Development Commands
 Run Ansible from the `script/` directory so `ansible.cfg` is picked up, or set `ANSIBLE_CONFIG=script/ansible.cfg`.
