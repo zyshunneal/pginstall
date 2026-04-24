@@ -7,29 +7,7 @@
   become: yes
   any_errors_fatal: true
   become_method: sudo
-  vars:
-    dba_password: "{{ lookup('env', 'PGINSTALL_DBA_PASSWORD') }}"
-    monitor_password: "{{ lookup('env', 'PGINSTALL_MONITOR_PASSWORD') }}"
-    stats_password: "{{ lookup('env', 'PGINSTALL_STATS_PASSWORD') }}"
-    replication_password: "{{ lookup('env', 'PGINSTALL_REPLICATION_PASSWORD') }}"
-    business_user_password: "{{ lookup('env', 'PGINSTALL_BUSINESS_USER_PASSWORD') }}"
-    pgbouncer_stats_password: "{{ lookup('env', 'PGINSTALL_PGBOUNCER_STATS_PASSWORD') }}"
-    business_username: "dbuser_{{ servername | replace('-', '') }}"
-    business_user_md5_password: "{{ 'md5' ~ ((business_user_password ~ business_username) | hash('md5')) }}"
-    pgbouncer_stats_md5_password: "{{ 'md5' ~ ((pgbouncer_stats_password ~ 'stats') | hash('md5')) }}"
   tasks:
-   - name: 校验主库初始化所需凭据环境变量
-     assert:
-       that:
-         - dba_password | length > 0
-         - monitor_password | length > 0
-         - stats_password | length > 0
-         - replication_password | length > 0
-         - business_user_password | length > 0
-         - pgbouncer_stats_password | length > 0
-       fail_msg: 缺少主库初始化所需环境变量，请设置 PGINSTALL_DBA_PASSWORD、PGINSTALL_MONITOR_PASSWORD、PGINSTALL_STATS_PASSWORD、PGINSTALL_REPLICATION_PASSWORD、PGINSTALL_BUSINESS_USER_PASSWORD、PGINSTALL_PGBOUNCER_STATS_PASSWORD
-     no_log: true
-
    - name: 初始化postgresql实例数据目录
      become: yes
      become_method: sudo
@@ -43,26 +21,23 @@
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_ctl -D /pg/data/ start
+     shell: /usr/pgsql/bin/pg_ctl -D /pg/data/ start 
 
    - name: database、default yay schema and user 初始化
      script: "./user_init.sh -S {{ servername }}"
-     environment:
-       PGINSTALL_DBA_PASSWORD: "{{ dba_password }}"
-       PGINSTALL_MONITOR_PASSWORD: "{{ monitor_password }}"
-       PGINSTALL_STATS_PASSWORD: "{{ stats_password }}"
-       PGINSTALL_REPLICATION_PASSWORD: "{{ replication_password }}"
-       PGINSTALL_BUSINESS_USER_PASSWORD: "{{ business_user_password }}"
-     no_log: true
 
-   - name: 注册业务用户和 Pgbouncer 认证变量
+   - name: 获取业务用户的用户名
+     shell: cat /home/postgres/.userinfo.conf | awk {'print $1'} | awk -F':' {'print $2'}
+     register: business_user_name
+
+   - name: 获取业务用户的密码
+     shell: cat /home/postgres/.userinfo.conf | awk {'print $2'} | awk -F':' {'print $2'}
+     register: business_user_passswd
+
+   - name: 注册变量保存业务用户名和密码
      set_fact:
-       username: "{{ business_username }}"
-       password: "{{ business_user_password }}"
-       md5_password: "{{ business_user_md5_password }}"
-       pgbouncer_stats_md5_password: "{{ pgbouncer_stats_md5_password }}"
-       servername: "{{ servername }}"
-     no_log: true
+          username: "{{ business_user_name.stdout }}"
+          password: "{{ business_user_passswd.stdout }}"
 
    - name: 拷贝标准化pg_hba文件
      copy: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
@@ -83,6 +58,15 @@
      copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
      when: ansible_memtotal_mb < 200000 and (pgversion | int) >= 12
 
+   - name: 获取md5 值的业务用户密码
+     shell: psql -U postgres  -AXtqc "select rolpassword from pg_authid where rolname='{{ username }}' "
+     register: user_password
+     
+   - name: 注册变量保存业务用户密码的md5值和服务名称
+     set_fact:
+         md5_password: "{{ user_password.stdout }}"
+         servername: "{{ servername }}"
+
    - name: 模板构建pgbouncer的 pgb_hba.conf 配置文件
      template: src=../templates/pgbouncer_initialize/pgb_hba.conf.j2 dest=/etc/pgbouncer/pgb_hba.conf force=yes backup=yes owner=pgbouncer  group=pgbouncer
 
@@ -93,9 +77,9 @@
      template: src=../templates/pgbouncer_initialize/userlist.txt.j2 dest=/etc/pgbouncer/userlist.txt  force=yes backup=yes owner=pgbouncer  group=pgbouncer mode=0600
 
    - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
-     shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer"
+     shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
 
-   - name: 重启postgresql,使配置文件生效
+   - name: 重启postgresql,使6、7步传入的配置文件生效
      become: yes
      become_method: sudo
      become_user: postgres
@@ -105,9 +89,8 @@
      become: yes
      become_method: sudo
      become_user: pgbouncer
-     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
+     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini 
 
    - name: 主库初始化最后一步，验证用户连通性
      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
      register: check_connresult
-     no_log: true

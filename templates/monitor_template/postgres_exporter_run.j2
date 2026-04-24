@@ -2,7 +2,7 @@
 exec 2>&1
 ulimit -n 102400
 ulimit -u 20480
-export DATA_SOURCE_NAME='host=127.0.0.1 port=6432 user=stats password={{ pgbouncer_stats_password }} sslmode=disable dbname=pgbouncer'
+export DATA_SOURCE_NAME='host=127.0.0.1 port=6432 user=stats password=Gah4Oo+h3Cae6ahd sslmode=disable dbname=pgbouncer'
 export PGB_EXPORTER_WEB_LISTEN_ADDRESS=':9127'
 export PGB_EXPORTER_WEB_TELEMETRY_PATH='/debug/metrics'
 exec "chpst" "-u" "root" "/usr/local/yay/bin/pgbouncer_exporter"
