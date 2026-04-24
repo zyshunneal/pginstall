@@ -231,22 +231,23 @@ pg_install() {
 
 
 dir_init() {
-    local basedir='/export'
+    local basedir='/mnt/storage00'
+    local archive_dir='/mnt/storage00/arcwal'
+    local backup_dir='/mnt/storage00/backup'
+    local remote_dir='/mnt/storage00/remote'
 
-    if [ ! -d "/export" ]; then
-        basedir='/data'
-    fi
+    mkdir -p "${basedir}"
 
     if [ ! -d "${basedir}/postgresql/${servername}db_${version}/" ]; then
         mkdir -p "${basedir}/postgresql/${servername}db_${version}"/{bin,conf,data,tlog,tmp}
-        mkdir -p /var/backups/{arcwal,backup,remote}
+        mkdir -p "${archive_dir}" "${backup_dir}" "${remote_dir}"
         ln -sf "${basedir}/postgresql/${servername}db_${version}" /pg
         ln -sf "${basedir}/postgresql/${servername}db_${version}/data/log" "${basedir}/postgresql/${servername}db_${version}"
-        ln -sf /var/backups/arcwal "${basedir}/postgresql/${servername}db_${version}"
-        ln -sf /var/backups/backup "${basedir}/postgresql/${servername}db_${version}"
-        ln -sf /var/backups/remote "${basedir}/postgresql/${servername}db_${version}"
-        chown -R postgres:postgres "${basedir}"/*
-        chown -R postgres:postgres /var/backups/*
+        ln -sf "${archive_dir}" "${basedir}/postgresql/${servername}db_${version}"
+        ln -sf "${backup_dir}" "${basedir}/postgresql/${servername}db_${version}"
+        ln -sf "${remote_dir}" "${basedir}/postgresql/${servername}db_${version}"
+        chown -R postgres:postgres "${basedir}/postgresql"
+        chown -R postgres:postgres "${archive_dir}" "${backup_dir}" "${remote_dir}"
     else
         echo_failure "Building a standardized directory structure fail" "Directory ${basedir}/postgresql/${servername}db_${version}/ exists. Please check manually."
         exit 1

@@ -134,7 +134,7 @@ PgBouncer config is rendered once on the master, then fetched and copied to non-
 
 ### Important operational assumptions
 
-- PostgreSQL data directory is always `/pg/data`.
+- PostgreSQL data directory is exposed as `/pg/data`, with `/pg` symlinked to the physical storage root under `/mnt/storage00/postgresql/...`.
 - PgBouncer config lives under `/etc/pgbouncer`.
 - Replication setup uses `pg_basebackup` from the master or first slave.
 - Several playbooks use shell commands heavily and assume target hosts already satisfy external prerequisites like SSH reachability, sudo, package repository access, and expected service accounts.

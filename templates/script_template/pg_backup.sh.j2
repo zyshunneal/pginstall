@@ -148,7 +148,7 @@ function shellInit()
     META_ID=0
 
     BACKUP_URL="postgres://replication:@127.0.0.1:5432/postgres"
-    BACKUP_DIR="/var/backups/backup"
+    BACKUP_DIR="/mnt/storage00/backup"
     BACKUP_TAG=$(hostname)
     BACKUP_FILE="backup_${BACKUP_TAG}_$(date +%Y%m%d).tar.lz4"
     BACKUP_UPLOAD="0"
