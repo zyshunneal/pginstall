@@ -12,9 +12,9 @@
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/initdb  -D /pg/data/
+     shell: /usr/pgsql/bin/initdb  -D /mnt/storage00/pg/data/
      args:
-       creates: /pg/data/PG_VERSION
+       creates: /mnt/storage00/pg/data/PG_VERSION
 
    - name: 修改 目录 权限
      shell: "mkdir -p /var/run/postgresql && chown -R  postgres.postgres /var/run/postgresql"
@@ -23,7 +23,7 @@
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_ctl -D /pg/data/ status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /pg/data/ start -w -t 3600
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ start -w -t 3600
 
    - name: database、default yay schema and user 初始化
      script: "./user_init.sh -S {{ servername }}"
@@ -42,14 +42,14 @@
           password: "{{ business_user_passswd.stdout }}"
 
    - name: 拷贝标准化pg_hba文件
-     template: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     template: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
 
    - name: 拷贝标准化postgrsql.conf文件
-     copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
      when: ansible_memtotal_mb > 200000
 
    - name: 拷贝标准化postgrsql.conf测试文件
-     copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
      when: ansible_memtotal_mb < 200000
 
    - name: 获取业务用户认证密文
@@ -92,7 +92,7 @@
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_ctl  -D /pg/data/ restart -t 3600
+     shell: /usr/pgsql/bin/pg_ctl  -D /mnt/storage00/pg/data/ restart -t 3600
 
    - name: 停止可能已在运行的 pgbouncer
      shell: |

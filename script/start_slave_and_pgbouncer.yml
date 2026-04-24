@@ -9,7 +9,7 @@
   become_method: sudo
   tasks:
    - name: 重启offline和slave实例
-     shell: su - postgres -c "chmod 0700 /pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "if /usr/pgsql/bin/pg_ctl -D /pg/data status >/dev/null 2>&1; then /usr/pgsql/bin/pg_ctl -D /pg/data restart -w -t 3600; else /usr/pgsql/bin/pg_ctl -D /pg/data start -w -t 3600; fi"
+     shell: su - postgres -c "chmod 0700 /mnt/storage00/pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "if /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1; then /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data restart -w -t 3600; else /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600; fi"
      when: inventory_hostname != groups["master"][0]
 
    - name: 获取主库的所有pgbouncer的配置文件到本地

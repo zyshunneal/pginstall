@@ -14,7 +14,7 @@
       become: yes
       become_method: sudo
       become_user: postgres
-      shell: /usr/pgsql/bin/pg_ctl -D /pg/data status
+      shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status
 
     - name: postgres readiness CHECK
       shell: /usr/pgsql/bin/pg_isready -h 127.0.0.1 -p 5432

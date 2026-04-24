@@ -11,11 +11,11 @@
     - name: 连通性测试，如果机器无法远程连接，那么所有操作都不可进行，此为第一前提条件
       action: ping
 
-    - name: check机器上是否有非 /pg/data 的 postgres 进程，有则退出；/pg/data 的实例允许幂等重跑
+    - name: check机器上是否有非 /mnt/storage00/pg/data 的 postgres 进程，有则退出；/mnt/storage00/pg/data 的实例允许幂等重跑
       shell: |
         conflicts=$(ps -eo args | awk '/[p]ostgres .*-D / {
           for (i=1; i<=NF; i++) if ($i=="-D") { d=$(i+1); break }
-          if (d != "/pg/data") print
+          if (d != "/mnt/storage00/pg/data") print
         }')
         if [ -n "$conflicts" ]; then
           echo "conflict postgres instance(s):"

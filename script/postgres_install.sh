@@ -259,14 +259,14 @@ dir_init() {
     local archive_dir='/mnt/storage00/arcwal'
     local backup_dir='/mnt/storage00/backup'
     local remote_dir='/mnt/storage00/remote'
-    local cluster_dir="${basedir}/postgresql/${servername}db_${version}"
+    local cluster_dir="${basedir}/pg"
 
     mkdir -p "${basedir}"
 
     if [ -f "${cluster_dir}/data/PG_VERSION" ]; then
         echo_log "PostgreSQL cluster already initialized at ${cluster_dir}/data, keep existing layout."
     else
-        if [ -d "${cluster_dir}" ]; then
+        if [ -d "${cluster_dir}" ] && [ ! -L "${cluster_dir}" ]; then
             echo_log "Stale directory ${cluster_dir} without PG_VERSION detected, cleaning up."
             rm -rf "${cluster_dir}"
         fi
@@ -274,12 +274,15 @@ dir_init() {
     fi
 
     mkdir -p "${archive_dir}" "${backup_dir}" "${remote_dir}"
-    ln -sfn "${cluster_dir}" /pg
+    # /pg 兼容符号链接，指向真实数据目录根
+    if [ -L /pg ] || [ ! -e /pg ]; then
+        ln -sfn "${cluster_dir}" /pg
+    fi
     ln -sfn "${cluster_dir}/data/log" "${cluster_dir}/log"
     ln -sfn "${archive_dir}" "${cluster_dir}/arcwal"
     ln -sfn "${backup_dir}" "${cluster_dir}/backup"
     ln -sfn "${remote_dir}" "${cluster_dir}/remote"
-    chown -R postgres:postgres "${basedir}/postgresql"
+    chown -R postgres:postgres "${cluster_dir}"
     chown -R postgres:postgres "${archive_dir}" "${backup_dir}" "${remote_dir}"
 }
 

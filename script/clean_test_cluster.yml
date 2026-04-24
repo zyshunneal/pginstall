@@ -18,10 +18,10 @@
        become: yes
        become_method: sudo
        become_user: postgres
-       shell: /usr/pgsql/bin/pg_ctl -D /pg/data stop || true
+       shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data stop || true
 
      - block:
-       - shell: cd /mnt/storage00 && rm -rf postgresql arcwal backup remote
+       - shell: cd /mnt/storage00 && rm -rf pg postgresql arcwal backup remote
        - shell: cd / && rm -rf pg
        - shell: test -f /var/run/pgbouncer/pgbouncer.pid && kill -9 $(cat /var/run/pgbouncer/pgbouncer.pid) || true
        - shell: cd /etc/pgbouncer && rm -rf *

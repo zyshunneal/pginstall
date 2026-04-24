@@ -134,7 +134,7 @@ PgBouncer config is rendered once on the master, then fetched and copied to non-
 
 ### Important operational assumptions
 
-- PostgreSQL data directory is exposed as `/pg/data`, with `/pg` symlinked to the physical storage root under `/mnt/storage00/postgresql/...`.
+- PostgreSQL data directory is `/mnt/storage00/pg/data`. Ansible commands (`initdb`, `pg_ctl`, `pg_basebackup`) reference this absolute path directly. `/pg` is kept as a compat symlink to `/mnt/storage00/pg` so legacy templates that reference `/pg/bin`, `/pg/arcwal`, `/pg/tlog` etc. still resolve.
 - PgBouncer config lives under `/etc/pgbouncer`.
 - Replication setup uses `pg_basebackup` from the master or first slave.
 - Several playbooks use shell commands heavily and assume target hosts already satisfy external prerequisites like SSH reachability, sudo, package repository access, and expected service accounts.
