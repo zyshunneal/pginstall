@@ -144,17 +144,21 @@ ensure_postgres_user() {
 
 setup_pgdg_apt_repo() {
     local codename="$1"
+    local key_path="/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc"
 
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release wget
+    apt-get install -y --no-install-recommends ca-certificates lsb-release
 
-    install -d -m 0755 /usr/share/postgresql-common/pgdg
-    curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/postgresql/keys/ACCC4CF8.asc \
-        | gpg --dearmor > /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+    if [ ! -s "${key_path}" ]; then
+        echo_failure \
+            "PGDG signing key is missing" \
+            "expected postgresql-common to provide ${key_path}; ensure postgresql-common is installed"
+        exit 1
+    fi
 
     cat > /etc/apt/sources.list.d/pgdg.list <<EOF
-deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://mirrors.tuna.tsinghua.edu.cn/postgresql/repos/apt ${codename}-pgdg main
+deb [signed-by=${key_path}] https://mirrors.aliyun.com/postgresql/repos/apt ${codename}-pgdg main
 EOF
 }
 
