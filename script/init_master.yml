@@ -65,6 +65,9 @@
          servername: "{{ servername }}"
 
    - name: 获取md5 值的业务用户密码
+     become: yes
+     become_method: sudo
+     become_user: postgres
      shell: psql -U postgres  -AXtqc "select rolpassword from pg_authid where rolname='{{ username }}' "
      register: user_password
      

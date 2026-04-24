@@ -79,10 +79,19 @@ fi
 USERINFO_FILE=/home/postgres/.userinfo.conf
 
 
+run_psql() {
+    if [ "$(id -un)" = "postgres" ]; then
+        psql "$@"
+    else
+        sudo -u postgres -n psql "$@"
+    fi
+}
+
+
 ensure_role() {
     local role="$1"
     local extra="$2"
-    psql -v ON_ERROR_STOP=1 -U postgres <<SQL
+    run_psql -v ON_ERROR_STOP=1 <<SQL
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${role}') THEN
@@ -97,9 +106,9 @@ SQL
 
 ensure_database() {
     local dbname="$1"
-    psql -v ON_ERROR_STOP=1 -U postgres -AXtqc \
+    run_psql -AXtqc \
         "SELECT 'CREATE DATABASE \"${dbname}\"' WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${dbname}');" \
-        | psql -v ON_ERROR_STOP=1 -U postgres
+        | run_psql -v ON_ERROR_STOP=1
 }
 
 
@@ -118,8 +127,8 @@ function user_initialization()
     dbname="putong-${server_name}"
 
     if [ -f "${USERINFO_FILE}" ] \
-        && psql -U postgres -AXtqc "SELECT 1 FROM pg_database WHERE datname = '${dbname}';" | grep -q '^1$' \
-        && psql -U postgres -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = '${business_user}';" | grep -q '^1$'; then
+        && run_psql -AXtqc "SELECT 1 FROM pg_database WHERE datname = '${dbname}';" | grep -q '^1$' \
+        && run_psql -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = '${business_user}';" | grep -q '^1$'; then
         echo_log "user_init: ${dbname} and ${business_user} already exist, reuse ${USERINFO_FILE}."
         password=$(awk '{print $2}' "${USERINFO_FILE}" | awk -F':' '{print $2}')
         echo_success "{'username':${business_user}, 'password':${password}}"
@@ -141,7 +150,7 @@ function user_initialization()
     ensure_role dbuser_dba                   "WITH SUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS PASSWORD '${DBA_PASSWORD}'"
     ensure_role replication                  "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS PASSWORD '${REPLICATION_PASSWORD}'"
 
-    psql -v ON_ERROR_STOP=1 -U postgres <<SQL
+    run_psql -v ON_ERROR_STOP=1 <<SQL
 SET password_encryption = 'scram-sha-256';
 GRANT dbrole_readonly TO dbrole_offline GRANTED BY postgres;
 GRANT dbrole_readwrite TO dbrole_readwrite_with_delete GRANTED BY postgres;
@@ -150,7 +159,7 @@ SQL
 
     ensure_database "${dbname}"
 
-    psql -v ON_ERROR_STOP=1 -U postgres -d "${dbname}" <<SQL
+    run_psql -v ON_ERROR_STOP=1 -d "${dbname}" <<SQL
 SET password_encryption = 'scram-sha-256';
 CREATE SCHEMA IF NOT EXISTS yay;
 CREATE TABLE IF NOT EXISTS yay.init_result_check_table
