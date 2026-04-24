@@ -8,8 +8,17 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
-   - name: 拷贝pgpass文件到机器的对应目录下，用于构建主从关系
+   - name: 获取 postgres 用户的实际家目录（libpq 查找 ~/.pgpass 用）
+     shell: "getent passwd postgres | cut -d: -f6"
+     register: pg_home
+     changed_when: false
+
+   - name: 拷贝 pgpass 到 /home/postgres（历史路径，user_init 同目录）
      copy: src=../templates/postgresql_initialize/pgpass dest=/home/postgres/.pgpass force=yes backup=yes owner=postgres group=postgres mode=0600
+
+   - name: 拷贝 pgpass 到 postgres 用户实际家目录（libpq 默认查找位置）
+     copy: src=../templates/postgresql_initialize/pgpass dest={{ pg_home.stdout }}/.pgpass force=yes backup=yes owner=postgres group=postgres mode=0600
+     when: pg_home.stdout | length > 0 and pg_home.stdout != '/home/postgres'
 
    - name: 判断 slave/offline 是否已经是 standby
      shell: |
