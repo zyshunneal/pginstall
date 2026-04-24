@@ -10,7 +10,15 @@
   vars:
       monitor_result: "监控部署完成"
       monitor_bin_dir: /usr/local/yay/bin
+      pgbouncer_stats_password: "{{ lookup('env', 'PGINSTALL_PGBOUNCER_STATS_PASSWORD') }}"
   tasks:
+    - name: 校验监控所需环境变量
+      assert:
+        that:
+          - pgbouncer_stats_password | length > 0
+        fail_msg: 缺少监控所需环境变量，请设置 PGINSTALL_PGBOUNCER_STATS_PASSWORD
+      no_log: true
+
     - name: 上传监控视图创建和用户授权脚本
       copy: src=./monitorview.sql dest=/home/postgres force=yes backup=no owner=postgres group=postgres mode=0775
       when: inventory_hostname == groups["master"][0]
@@ -45,7 +53,7 @@
                  - prometheus-pgbouncer-exporter
                  - prometheus-postgres-exporter
                  - prometheus-shannon-exporter
-         - copy: src=../templates/monitor_template/pgbouncer_exporter_run.j2 dest=/etc/sv/prometheus-pgbouncer-exporter/run force=yes backup=yes owner=root group=root mode=0775
+         - template: src=../templates/monitor_template/pgbouncer_exporter_run.j2 dest=/etc/sv/prometheus-pgbouncer-exporter/run force=yes backup=yes owner=root group=root mode=0775
          - copy: src=../templates/monitor_template/shannon_exporter_run.j2 dest=/etc/sv/prometheus-shannon-exporter/run force=yes backup=yes owner=root group=root mode=0775
          - template: src=../templates/monitor_template/postgres_exporter_run.j2 dest=/etc/sv/prometheus-postgres-exporter/run force=yes backup=yes owner=root group=root mode=0775
          - file: src=/etc/sv/{{ item }} dest=/etc/service/{{ item }} state=link

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#Author: 
+#Author:
 #Date:
 #Description:
 #Usage:
@@ -55,7 +55,7 @@
             ;;
             ok)
                 echo "OK" >> ${logFile}
-                echo -e "\033[32;49;1mOK\033[39;49;0m" 
+                echo -e "\033[32;49;1mOK\033[39;49;0m"
             ;;
             *)
                 echo -e "\033[31;49;1m[`date +%F' '%T`] Error: Call founction showMsg error\033[39;49;0m"  | tee -a ${logFile}
@@ -123,7 +123,6 @@ function shellInit()
     export pid="${pid}-->$sid"
     theFiledir=`echo $(cd "$(dirname "$0")"; pwd)`
     cd ${theFiledir}
-    #默认日志文件为“本文件名.log”，如main函数有传入logFile参数（如不带路径则为当前目录），则以传入的日志文件名为准
     theFileName=`basename $0 | awk -F"." '{print $1}'`
     if [ "${logFile}" = "" ]; then
         logFile="${theFileName}.log"
@@ -136,26 +135,20 @@ function shellInit()
     logFile="${logFilePath}/${logFileName}"
     mkdir -p ${logFilePath}
     touch ${logFile}
-    #退出/中止（包括导常退出）脚本时执行的命令
-    #trapCmd="rm -f ~/.pgpass"
-    #trap 'eval ${trapCmd}' EXIT
-    #--------以上为框架规定，建议不要做修改----------
 
-    #--------全局变量社区区域---------
     export PATH=${PATH}:/usr/local/bin:/sbin:/usr/pgsql/bin
 
-    META_URL="postgres://dbuser_backup:8dsjIU9238@10.179.10.102:5432/dbcenter"
+    META_URL="{{ backup_meta_url }}"
     META_ID=0
 
-    BACKUP_URL="postgres://replication:@127.0.0.1:5432/postgres"
+    BACKUP_URL="{{ backup_url }}"
     BACKUP_DIR="/var/backups/backup"
     BACKUP_TAG=$(hostname)
     BACKUP_FILE="backup_${BACKUP_TAG}_$(date +%Y%m%d).tar.lz4"
     BACKUP_UPLOAD="0"
-    BACKUP_RM_AGO=1200      #1200分钟（20小时之前的备份删除）
-    
+    BACKUP_RM_AGO=1200
 }
-#使用说明
+
 function usage()
 {
     parameter="$1"
@@ -179,7 +172,6 @@ function bak_begin()
 function bak_execute()
 {
     local sql=''
-#decrypt        openssl enc -rc4 -d -k ${BACKUP_TAG} -in /${BACKUP_DIR}/${BACKUP_FILE} | unlz4 -c  | tar -xC ${DES_DIR}
     pg_basebackup -d ${BACKUP_URL} -Xf -Ft -c fast -v -D -  \
     | lz4 -q -z \
     | openssl enc -rc4 -k ${BACKUP_TAG} > /${BACKUP_DIR}/${BACKUP_FILE}
@@ -196,7 +188,6 @@ function bak_execute()
     sql="update database_backup_info set bak_success = true where id = ${META_ID}"
     psql ${META_URL} -Aqtc "${sql}"
     showMsg 'errsysmsg' "fail to execute '${sql}'"
-
 }
 
 function bak_upload()
@@ -228,7 +219,6 @@ function bak_upload()
     showMsg 'errsysmsg' "fail to execute '${sql}'"
 }
 
-
 function bak_remove()
 {
     local rm_files=$(find ${BACKUP_DIR} -maxdepth 1 -type f -name '*.lz4' -mmin +${BACKUP_RM_AGO})
@@ -244,13 +234,10 @@ function bak_remove()
         for file in ${rm_files}
         do
             filemgr -action delete -bucket postgresql-backup -key $(basename ${file})
-            #showMsg "errsysmsg" "fail to 'filemgr -action delete -bucket postgresql-backup -key ${file}'"
         done
         showMsg 'msg' "success remove ufile file: ${rm_files}"
     fi
 }
-
-
 
 function bak_end()
 {
@@ -267,15 +254,11 @@ function bak_end()
     showMsg 'ok'
 }
 
-
-
-#主函数
 function main()
 {
     logFile="$1"
     usage "$1"
     shellInit
-############
     bak_begin
     bak_execute
     bak_upload

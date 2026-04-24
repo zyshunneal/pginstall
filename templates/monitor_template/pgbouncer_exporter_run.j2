@@ -2,5 +2,5 @@
 exec 2>&1
 ulimit -n 102400
 ulimit -u 20480
-export PGBOUNCER_PASSWORD=Gah4Oo+h3Cae6ahd
+export PGBOUNCER_PASSWORD='{{ pgbouncer_stats_password }}'
 exec "chpst" "-u" "root" "/usr/bin/prometheus-pgbouncer-exporter" "--pgbouncer-host"="127.0.0.1" "--pgbouncer-port"="6432" "--pgbouncer-user"="stats"
