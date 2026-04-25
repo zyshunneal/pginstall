@@ -95,8 +95,9 @@ The PGDG APT source uses the Aliyun mirror; the signing key is downloaded online
 
 - creates the standard roles (DO-block conditional, idempotent),
 - creates database `putong-${servername}` (idempotent via `\gexec`),
+- enables `vector` extension inside the business DB (`CREATE EXTENSION IF NOT EXISTS vector`); the matching `postgresql-${major_version}-pgvector` package is added to the optional package list of `postgres_install.sh` and skipped silently if the APT mirror does not carry it,
 - creates schema `yay` and `yay.init_result_check_table`,
-- generates the business user `dbuser_<servername>`, **always** `ALTER USER ... WITH PASSWORD` so the on-disk `.userinfo.conf` and the cluster password stay in sync after a partially-failed previous run,
+- generates the business user `dbuser_<servername>`, only resetting its password via `ALTER USER` when the role pre-existed without a matching `.userinfo.conf` (steady-state reruns short-circuit and never rotate the password),
 - writes `/home/postgres/.userinfo.conf`, which `init_master.yml` later reads back.
 
 ### Topology model

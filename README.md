@@ -1,6 +1,6 @@
 # database_cluster_autoinit
 
-一套用于在 **Debian 12** 主机上一键拉起 **PostgreSQL 17 / 18** 主备集群（含 PgBouncer、cron 维护脚本、流复制从库、可选 offline 下游）的 Ansible 项目。
+一套用于在 **Debian 12** 主机上一键拉起 **PostgreSQL 17 / 18** 主备集群（含 PgBouncer、cron 维护脚本、流复制从库、可选 offline 下游、默认启用 **pgvector** 向量扩展）的 Ansible 项目。
 
 整条 pipeline 设计为**可重复执行**：稳态重跑不会重启已运行的 PG / PgBouncer，配置文件无变化就不触发任何服务动作。
 

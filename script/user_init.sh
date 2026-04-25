@@ -168,6 +168,8 @@ SQL
 
     run_psql -v ON_ERROR_STOP=1 -d "${dbname}" <<SQL
 SET password_encryption = 'scram-sha-256';
+-- 业务库默认启用 pgvector 向量扩展（包未装时会失败，需提前确保 postgresql-XX-pgvector 已安装）
+CREATE EXTENSION IF NOT EXISTS vector;
 CREATE SCHEMA IF NOT EXISTS yay;
 CREATE TABLE IF NOT EXISTS yay.init_result_check_table
 (

@@ -223,7 +223,8 @@ EOF
         "pgpool2" \
         "postgresql-${major_version}-repack" \
         "postgresql-${major_version}-postgis-3" \
-        "postgresql-${major_version}-postgis-3-scripts"
+        "postgresql-${major_version}-postgis-3-scripts" \
+        "postgresql-${major_version}-pgvector"
     do
         if package_exists_apt "${pkg}"; then
             optional_packages+=("${pkg}")
