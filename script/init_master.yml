@@ -8,35 +8,25 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
+   - name: 检查控制机本地密码文件
+     stat:
+       path: "{{ lookup('env', 'HOME') + '/.pginstall/secrets.env' }}"
+     delegate_to: localhost
+     become: false
+     register: local_secrets_file
+     no_log: true
+
    - name: 读取控制机本地密码文件
-     set_fact:
-       local_secrets_raw: "{{ lookup('file', lookup('env', 'HOME') + '/.pginstall/secrets.env', errors='ignore') }}"
+     include_vars:
+       file: "{{ lookup('env', 'HOME') + '/.pginstall/secrets.env' }}"
+       name: pginstall_secrets
+     when: local_secrets_file.stat.exists
      no_log: true
 
    - name: 解析 PostgreSQL 管理密码
      set_fact:
-       dba_password: >-
-         {{
-           (
-             local_secrets_raw
-             | regex_search('(?m)^DBA_PASSWORD=[\"'']?([^\"''\\n]+)[\"'']?\\s*$', '\\1')
-             | default([], true)
-             | first
-             | default('', true)
-           )
-           or lookup('env', 'PGINSTALL_DBA_PASSWORD')
-         }}
-       replication_password: >-
-         {{
-           (
-             local_secrets_raw
-             | regex_search('(?m)^REPLICATION_PASSWORD=[\"'']?([^\"''\\n]+)[\"'']?\\s*$', '\\1')
-             | default([], true)
-             | first
-             | default('', true)
-           )
-           or lookup('env', 'PGINSTALL_REPLICATION_PASSWORD')
-         }}
+       dba_password: "{{ pginstall_secrets.DBA_PASSWORD | default(lookup('env', 'PGINSTALL_DBA_PASSWORD'), true) }}"
+       replication_password: "{{ pginstall_secrets.REPLICATION_PASSWORD | default(lookup('env', 'PGINSTALL_REPLICATION_PASSWORD'), true) }}"
      no_log: true
 
    - name: 校验 PostgreSQL 管理密码已配置

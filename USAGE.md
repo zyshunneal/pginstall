@@ -116,8 +116,8 @@ ansible-playbook cluster_init.yml -i /path/to/hosts -e "pgversion=17 servername=
 mkdir -p ~/.pginstall
 chmod 700 ~/.pginstall
 cat > ~/.pginstall/secrets.env <<'EOF'
-DBA_PASSWORD='your-dba-password'
-REPLICATION_PASSWORD='your-replication-password'
+DBA_PASSWORD: "your-dba-password"
+REPLICATION_PASSWORD: "your-replication-password"
 EOF
 chmod 600 ~/.pginstall/secrets.env
 ```
