@@ -45,11 +45,21 @@ help() {
     cat << EOF
 Usage: $0 [OPTIONS]
 Options:
-    --version -V Specify the database version to install
-    --servername -S Specify the database server name to install
+    --version    -V  Specify the database version to install (17 or 18)
+    --servername -S  Specify the database server name to install
+    --step       -s  Run a single phase only. Valid values:
+                       preflight    OS / 版本预检
+                       apt-source   写入 PGDG 阿里云镜像 + Pigsty 中国镜像 APT 源
+                       packages     apt-get install PostgreSQL / PgBouncer / pgvector / pgvectorscale
+                       accounts     建立 postgres / pgbouncer / pgpool 账号与 /home/postgres
+                       dirs         /mnt/storage00/pg 目录树和符号链接
+                       sysctl       内核参数 / limits / grub / rc.local
+                       all          顺序执行以上所有 (默认)
 EOF
 }
 
+
+step="all"
 
 while test $# -gt 0
 do
@@ -62,7 +72,11 @@ do
             version=$2
             shift
             ;;
-        --help)
+        --step|-s)
+            step=$2
+            shift
+            ;;
+        --help|-h)
             help
             exit 0
             ;;
@@ -83,6 +97,9 @@ if [ -z "${servername:-}" ]; then
     echo_failure "parameter parse error. Please select servername" ""
     exit 1
 fi
+
+step_begin() { echo_log "[STEP][$1] start"; }
+step_end()   { echo_log "[STEP][$1] done"; }
 
 
 detect_os() {
@@ -207,12 +224,9 @@ package_exists_apt() {
 }
 
 
-install_debian_packages() {
+setup_apt_sources_only() {
     local dbversion="$1"
     local major_version="${dbversion%%.*}"
-    local core_packages=""
-    local required_extension_packages=()
-    local optional_packages=()
 
     if [ -z "${OS_CODENAME:-}" ]; then
         echo_failure "Debian package setup error" "VERSION_CODENAME is missing from /etc/os-release"
@@ -239,12 +253,10 @@ EOF
         exit 1
     fi
 
-    required_extension_packages=(
-        "postgresql-${major_version}-pgvector"
+    for pkg in \
+        "postgresql-${major_version}-pgvector" \
         "postgresql-${major_version}-pgvectorscale"
-    )
-
-    for pkg in "${required_extension_packages[@]}"; do
+    do
         if ! package_exists_apt "${pkg}"; then
             echo_failure \
                 "Required PostgreSQL extension package is unavailable" \
@@ -252,6 +264,20 @@ EOF
             exit 1
         fi
     done
+}
+
+
+install_packages_only() {
+    local dbversion="$1"
+    local major_version="${dbversion%%.*}"
+    local core_packages=""
+    local required_extension_packages=()
+    local optional_packages=()
+
+    required_extension_packages=(
+        "postgresql-${major_version}-pgvector"
+        "postgresql-${major_version}-pgvectorscale"
+    )
 
     core_packages="numactl pwgen lz4 unzip gcc net-tools uuid-runtime libxml2 libxslt1.1 python3 python3-dev tcl postgresql-${major_version} postgresql-client-${major_version} postgresql-contrib-${major_version} postgresql-server-dev-${major_version} pgbouncer"
 
@@ -266,6 +292,7 @@ EOF
         fi
     done
 
+    export DEBIAN_FRONTEND=noninteractive
     apt-get install -y --no-install-recommends ${core_packages} "${required_extension_packages[@]}" "${optional_packages[@]}"
 
     ensure_locale
@@ -294,6 +321,14 @@ EOF
             systemctl stop pgbouncer || true
         fi
     fi
+}
+
+
+# 兼容入口：等价于 setup_apt_sources_only + install_packages_only。
+# 如有旧脚本/手动调试 source 本文件后调用 pg_install / install_debian_packages 仍能用。
+install_debian_packages() {
+    setup_apt_sources_only "$1"
+    install_packages_only "$1"
 }
 
 
@@ -474,14 +509,62 @@ EOF
 
 
 main() {
+    # detect_os 写入 OS_CODENAME / OS_VERSION_ID，validate_pgversion 校验 PG 版本；
+    # 这两个动作轻量幂等，所有 step 都需要它们的副作用，所以无条件先跑。
     detect_os
     validate_pgversion
-    ensure_postgres_user
-    pg_install "${version}"
-    ensure_service_accounts
-    dir_init
-    optimize
-    echo_success
+
+    case "${step}" in
+        preflight)
+            step_begin preflight
+            step_end preflight
+            echo_success
+            ;;
+        apt-source)
+            step_begin apt-source
+            setup_apt_sources_only "${version}"
+            step_end apt-source
+            echo_success
+            ;;
+        packages)
+            step_begin packages
+            install_packages_only "${version}"
+            step_end packages
+            echo_success
+            ;;
+        accounts)
+            step_begin accounts
+            ensure_postgres_user
+            ensure_service_accounts
+            step_end accounts
+            echo_success
+            ;;
+        dirs)
+            step_begin dirs
+            dir_init
+            step_end dirs
+            echo_success
+            ;;
+        sysctl)
+            step_begin sysctl
+            optimize
+            step_end sysctl
+            echo_success
+            ;;
+        all)
+            step_begin preflight ;                                          step_end preflight
+            step_begin apt-source ; setup_apt_sources_only "${version}" ;   step_end apt-source
+            step_begin packages   ; install_packages_only  "${version}" ;   step_end packages
+            step_begin accounts   ; ensure_postgres_user ; ensure_service_accounts ; step_end accounts
+            step_begin dirs       ; dir_init ;                              step_end dirs
+            step_begin sysctl     ; optimize ;                              step_end sysctl
+            echo_success
+            ;;
+        *)
+            echo_failure "unknown step: ${step}" "valid steps: preflight|apt-source|packages|accounts|dirs|sysctl|all"
+            exit 1
+            ;;
+    esac
 }
 
 main

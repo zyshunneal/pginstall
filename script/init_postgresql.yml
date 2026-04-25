@@ -1,6 +1,6 @@
 #!/usr/bin/ansible-playbook
 ---
-- name: 二、调用软件安装脚本完成软件安装
+- name: 三、调用软件安装脚本完成软件安装（按 step 拆分以便定位故障）
   hosts: all
   gather_facts: false
   serial: 10
@@ -8,31 +8,39 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
-    - name: 安装指定版本的 postgresql 软件
-      script: "./postgres_install.sh  -V {{ pgversion }}  -S {{ servername }} 2>/tmp/postgres_install.log"
-      async: 0
+    - name: 1/6 OS / PG 版本预检 (preflight)
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step preflight 2>>/tmp/postgres_install.preflight.log"
+      register: pi_preflight
+      changed_when: false
 
-   # - name: 重启机器关闭numa
-   #   shell: reboot
-   #   async: 10
-   #   poll: 0
+    - name: 2/6 配置 PGDG 阿里云 / Pigsty 中国镜像 APT 源 (apt-source)
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step apt-source 2>>/tmp/postgres_install.apt-source.log"
+      register: pi_apt_source
 
-   # - name: 等待机器重启完成，此处会等待10分钟，预计10分钟机器一定可以重启完成
-   #   local_action:
-   #        module: wait_for
-   #        host: 127.0.0.1
-   #        port: 22
-   #        delay: 600
-   #        timeout: 3600
-   #        state: started
-   # 
-    - name: check机器重启结果，如果有未能10分钟重启完成的则退出执行，需要人工check
+    - name: 3/6 安装 PostgreSQL / PgBouncer / pgvector / pgvectorscale (packages)
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step packages 2>>/tmp/postgres_install.packages.log"
+      register: pi_packages
+
+    - name: 4/6 建立 postgres / pgbouncer / pgpool 系统账号 (accounts)
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step accounts 2>>/tmp/postgres_install.accounts.log"
+      register: pi_accounts
+
+    - name: 5/6 创建数据目录树和符号链接 (dirs)
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step dirs 2>>/tmp/postgres_install.dirs.log"
+      register: pi_dirs
+
+    - name: 6/6 内核 / sysctl / limits / grub / rc.local (sysctl)
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step sysctl 2>>/tmp/postgres_install.sysctl.log"
+      register: pi_sysctl
+
+    - name: 检查机器重启后联通性
       action: ping
 
-    - name: 获取numa设置
+    - name: 获取 numa 设置
       shell: numactl  --hardware | grep cpus | grep -v grep  | wc -l
       register: numa_stat
+      changed_when: false
 
-    - name: check numa设置情况，如果开启了numa 则不进行接下来的安装工作
-      shell: "echo 'OS Open numa，so exit cluster init ' | exit 1"
+    - name: numa 仍开启则退出，集群不应在开启 numa 的机器上构建
+      shell: "echo 'OS Open numa, so exit cluster init' | exit 1"
       when: numa_stat.stdout | int != 1
