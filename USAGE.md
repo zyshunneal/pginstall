@@ -7,9 +7,10 @@
 本项目用于通过 Ansible 初始化 PostgreSQL 主从集群，并完成以下工作：
 
 - 安装 PostgreSQL 17 或 18、PgBouncer、pgpool 相关包。
+- 通过 Pigsty 中国镜像安装 `pgvector` 和 `pgvectorscale` 扩展包。
 - 初始化 1 台 master、可选多台 slave、可选多台 offline。
 - 建立 streaming replication。
-- 初始化业务库、schema、业务用户。
+- 初始化业务库、schema、业务用户和 `vector` / `vectorscale` 扩展。
 - 渲染 PostgreSQL 与 PgBouncer 配置。
 - 部署维护脚本和 cron。
 - 执行部署后连通性、读写、复制检查。
@@ -46,6 +47,7 @@ ANSIBLE_CONFIG=script/ansible.cfg ansible-playbook script/cluster_init.yml
 - 当前 SSH 用户可以免密 `sudo`。
 - 已挂载 `/mnt/storage00`，且容量满足数据库使用需求。
 - 能访问 `https://mirrors.aliyun.com/postgresql/repos/apt`。
+- 能访问 `https://repo.pigsty.cc`，用于安装 `pgvectorscale` 等额外扩展包。
 - 不存在非本项目管理的数据目录对应的 PostgreSQL 进程。
 
 安装脚本会拒绝非 Debian 12 系统，PostgreSQL 版本只允许 17 或 18。
@@ -248,8 +250,8 @@ ansible-playbook init_postgresql.yml -e "pgversion=17 servername=agent"
 用途：
 
 - 调用 `postgres_install.sh -V {{ pgversion }} -S {{ servername }}`。
-- 配置 PGDG Aliyun 源。
-- 安装 PostgreSQL、PgBouncer、pgpool、PostGIS、维护工具等软件包。
+- 配置 PGDG Aliyun 源和 Pigsty 中国扩展源。
+- 安装 PostgreSQL、PgBouncer、pgpool、PostGIS、维护工具、`pgvector`、`pgvectorscale` 等软件包。
 - 创建 `/mnt/storage00/pg` 目录树。
 - 创建 `/pg` 到 `/mnt/storage00/pg` 的兼容符号链接。
 - 创建 `/usr/pgsql` 到当前 PG 版本目录的符号链接。
@@ -269,6 +271,7 @@ ansible-playbook init_master.yml -e "pgversion=17 servername=agent"
 - 执行 `initdb`。
 - 启动 master PostgreSQL。
 - 调用 `user_init.sh -S {{ servername }}` 初始化角色、业务库、schema、业务用户。
+- 在业务库内创建 `vector` 和 `vectorscale` 扩展。
 - 渲染 master 侧 `pg_hba.conf`、`postgresql.conf`。
 - 渲染 PgBouncer 的 `pgb_hba.conf`、`pgbouncer.ini`、`userlist.txt`。
 - 启动或重启 PgBouncer。
@@ -426,6 +429,7 @@ sudo ./user_init.sh -S agent
 
 - 创建标准角色。
 - 创建业务库 `putong-${servername}`。
+- 创建 `vector` 和 `vectorscale` 扩展。
 - 创建 `yay` schema 和检查表。
 - 创建业务用户 `dbuser_${servername}`。
 - 写入 `/home/postgres/.userinfo.conf`。
@@ -594,6 +598,18 @@ sudo -u postgres psql -AXtqc "select client_addr,state,sync_state from pg_stat_r
 
 ```bash
 sudo -u postgres psql -AXtqc "select pg_is_in_recovery();"
+```
+
+查看向量扩展是否可用：
+
+```bash
+sudo -u postgres psql -d "putong-agent" -AXtqc "select name, default_version, installed_version from pg_available_extensions where name in ('vector','vectorscale') order by name;"
+```
+
+查看业务库是否已安装向量扩展：
+
+```bash
+sudo -u postgres psql -d "putong-agent" -AXtqc "select extname, extversion from pg_extension where extname in ('vector','vectorscale') order by extname;"
 ```
 
 通过 PgBouncer 连接业务库：

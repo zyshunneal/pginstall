@@ -113,11 +113,13 @@ ensure_database() {
 
 
 # 确保业务库内的扩展齐备（与短路与否无关都要跑，CREATE EXTENSION IF NOT EXISTS 自身幂等）。
-# 之前已经初始化但 pgvector 包是后期补装的场景下，这一步把扩展也拉齐。
+# 之前已经初始化但向量扩展包是后期补装的场景下，这一步把扩展也拉齐。
 ensure_extensions() {
     local dbname="$1"
-    run_psql -v ON_ERROR_STOP=1 -d "${dbname}" -c \
-        "CREATE EXTENSION IF NOT EXISTS vector;"
+    run_psql -v ON_ERROR_STOP=1 -d "${dbname}" <<SQL
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;
+SQL
 }
 
 

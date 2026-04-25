@@ -182,6 +182,26 @@ EOF
 }
 
 
+setup_pigsty_apt_repo() {
+    local codename="$1"
+    local key_path="/etc/apt/keyrings/pigsty.gpg"
+    local key_url="https://repo.pigsty.cc/key"
+
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y --no-install-recommends ca-certificates gnupg wget
+
+    install -d -m 0755 /etc/apt/keyrings
+    rm -f "${key_path}" /etc/apt/sources.list.d/pigsty*.list
+    wget --quiet -O - "${key_url}" | gpg --dearmor -o "${key_path}"
+    chmod 0644 "${key_path}"
+
+    cat > /etc/apt/sources.list.d/pigsty-cc.list <<EOF
+deb [signed-by=${key_path}] https://repo.pigsty.cc/apt/infra generic main
+deb [signed-by=${key_path}] https://repo.pigsty.cc/apt/pgsql/${codename} ${codename} main
+EOF
+}
+
+
 package_exists_apt() {
     apt-cache show "$1" >/dev/null 2>&1
 }
@@ -191,6 +211,7 @@ install_debian_packages() {
     local dbversion="$1"
     local major_version="${dbversion%%.*}"
     local core_packages=""
+    local required_extension_packages=()
     local optional_packages=()
 
     if [ -z "${OS_CODENAME:-}" ]; then
@@ -208,6 +229,7 @@ create_main_cluster = false
 EOF
 
     setup_pgdg_apt_repo "${OS_CODENAME}"
+    setup_pigsty_apt_repo "${OS_CODENAME}"
     apt-get update
 
     if ! package_exists_apt "postgresql-${major_version}"; then
@@ -217,21 +239,34 @@ EOF
         exit 1
     fi
 
+    required_extension_packages=(
+        "postgresql-${major_version}-pgvector"
+        "postgresql-${major_version}-pgvectorscale"
+    )
+
+    for pkg in "${required_extension_packages[@]}"; do
+        if ! package_exists_apt "${pkg}"; then
+            echo_failure \
+                "Required PostgreSQL extension package is unavailable" \
+                "${pkg} is not available from the configured PGDG/Pigsty APT repositories."
+            exit 1
+        fi
+    done
+
     core_packages="numactl pwgen lz4 unzip gcc net-tools uuid-runtime libxml2 libxslt1.1 python3 python3-dev tcl postgresql-${major_version} postgresql-client-${major_version} postgresql-contrib-${major_version} postgresql-server-dev-${major_version} pgbouncer"
 
     for pkg in \
         "pgpool2" \
         "postgresql-${major_version}-repack" \
         "postgresql-${major_version}-postgis-3" \
-        "postgresql-${major_version}-postgis-3-scripts" \
-        "postgresql-${major_version}-pgvector"
+        "postgresql-${major_version}-postgis-3-scripts"
     do
         if package_exists_apt "${pkg}"; then
             optional_packages+=("${pkg}")
         fi
     done
 
-    apt-get install -y --no-install-recommends ${core_packages} "${optional_packages[@]}"
+    apt-get install -y --no-install-recommends ${core_packages} "${required_extension_packages[@]}" "${optional_packages[@]}"
 
     ensure_locale
 
