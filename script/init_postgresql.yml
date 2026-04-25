@@ -33,7 +33,7 @@
       script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step sysctl 2>>/tmp/postgres_install.sysctl.log"
       register: pi_sysctl
 
-    - name: 检查机器重启后联通性
+    - name: 检查软件安装后主机连通性
       action: ping
 
     - name: 获取 numa 设置
