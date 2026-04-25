@@ -112,6 +112,15 @@ ensure_database() {
 }
 
 
+# 确保业务库内的扩展齐备（与短路与否无关都要跑，CREATE EXTENSION IF NOT EXISTS 自身幂等）。
+# 之前已经初始化但 pgvector 包是后期补装的场景下，这一步把扩展也拉齐。
+ensure_extensions() {
+    local dbname="$1"
+    run_psql -v ON_ERROR_STOP=1 -d "${dbname}" -c \
+        "CREATE EXTENSION IF NOT EXISTS vector;"
+}
+
+
 function user_initialization()
 {
     local raw_password
@@ -130,6 +139,8 @@ function user_initialization()
         && run_psql -AXtqc "SELECT 1 FROM pg_database WHERE datname = '${dbname}';" | grep -q '^1$' \
         && run_psql -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = '${business_user}';" | grep -q '^1$'; then
         echo_log "user_init: ${dbname} and ${business_user} already exist, reuse ${USERINFO_FILE}."
+        # 即便走短路路径也补一次扩展，覆盖"老集群、pgvector 是这一轮才装包"的场景
+        ensure_extensions "${dbname}"
         password=$(awk '{print $2}' "${USERINFO_FILE}" | awk -F':' '{print $2}')
         echo_success "{'username':${business_user}, 'password':${password}}"
         return 0
@@ -166,10 +177,11 @@ SQL
 
     ensure_database "${dbname}"
 
+    # 扩展统一通过 ensure_extensions 维护，短路与全量路径共用
+    ensure_extensions "${dbname}"
+
     run_psql -v ON_ERROR_STOP=1 -d "${dbname}" <<SQL
 SET password_encryption = 'scram-sha-256';
--- 业务库默认启用 pgvector 向量扩展（包未装时会失败，需提前确保 postgresql-XX-pgvector 已安装）
-CREATE EXTENSION IF NOT EXISTS vector;
 CREATE SCHEMA IF NOT EXISTS yay;
 CREATE TABLE IF NOT EXISTS yay.init_result_check_table
 (
