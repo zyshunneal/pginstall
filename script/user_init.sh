@@ -162,6 +162,7 @@ function user_initialization()
         # 即便走短路路径也补一次扩展，覆盖"老集群、pgvector 是这一轮才装包"的场景
         ensure_extensions "${dbname}"
         password=$(awk '{print $2}' "${USERINFO_FILE}" | awk -F':' '{print $2}')
+        run_psql -v ON_ERROR_STOP=1 -d "${dbname}" -c "ALTER USER \"${business_user}\" WITH PASSWORD '${password}';"
         echo_success "{'username':${business_user}, 'password':${password}}"
         return 0
     fi
