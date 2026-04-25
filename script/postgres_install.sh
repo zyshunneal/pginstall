@@ -387,22 +387,46 @@ ensure_kernel_args() {
 }
 
 
-ensure_rc_local() {
-    local rc_local=/etc/rc.local
+ensure_pg_tuning_service() {
+    # 把 THP/defrag 的运行时兜底从 /etc/rc.local 迁移到一个 systemd oneshot unit。
+    # 原因：Debian 12 默认不会在 boot 时自动跑 /etc/rc.local（rc-local generator 仅
+    # 在文件存在 + 可执行 + 头部 #!/bin/sh -e 时才 enable，并且这个机制在未来发行版
+    # 不被保证）。改成显式 systemd unit 之后，重启后 sysfs 的兜底一定会被执行。
+    local unit=/etc/systemd/system/pg-tuning.service
+    local desired
+    desired="$(cat <<'EOF'
+[Unit]
+Description=PostgreSQL host runtime tuning (THP knobs)
+After=local-fs.target
+DefaultDependencies=no
 
-    if [ ! -f "${rc_local}" ]; then
-        cat > "${rc_local}" <<'EOF'
-#!/bin/sh -e
-exit 0
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c "echo never > /sys/kernel/mm/transparent_hugepage/enabled || true"
+ExecStart=/bin/sh -c "echo never > /sys/kernel/mm/transparent_hugepage/defrag || true"
+
+[Install]
+WantedBy=multi-user.target
 EOF
+)"
+
+    local need_reload=0
+    if [ ! -f "${unit}" ] || ! printf '%s\n' "${desired}" | cmp -s - "${unit}"; then
+        printf '%s\n' "${desired}" > "${unit}"
+        chmod 0644 "${unit}"
+        need_reload=1
     fi
 
-    if ! grep -q 'Database optimisation' "${rc_local}"; then
-        sed -i "/^exit 0$/i # Database optimisation\necho 'never' > /sys/kernel/mm/transparent_hugepage/enabled\necho 'never' > /sys/kernel/mm/transparent_hugepage/defrag" "${rc_local}"
+    if command -v systemctl >/dev/null 2>&1; then
+        if [ "${need_reload}" = "1" ]; then
+            systemctl daemon-reload
+        fi
+        systemctl enable pg-tuning.service >/dev/null 2>&1 || true
+        # restart 一次，确保本次安装也立刻把 sysfs 设置好（oneshot + RemainAfterExit
+        # 模式下 restart 等价于重新执行 ExecStart 链）。
+        systemctl restart pg-tuning.service || true
     fi
-
-    chmod +x "${rc_local}"
-    sh "${rc_local}" || true
 }
 
 
@@ -443,10 +467,12 @@ optimize() {
         net.ipv4.tcp_max_tw_buckets = 262144
         net.ipv4.tcp_rmem = 8192 87380 16777216
         net.ipv4.tcp_wmem = 8192 65536 16777216
-        vm.dirty_background_bytes = 409600000
+        # 脏页阈值改用绝对字节数（dirty_ratio 配合大内存机会让脏页堆到内存的 80%
+        # 触发 IO stall）。同时设置 dirty_bytes 会让 dirty_ratio 自动失效。
+        vm.dirty_background_bytes = 1073741824
+        vm.dirty_bytes = 4294967296
         net.ipv4.ip_local_port_range = 40000 65535
         vm.dirty_expire_centisecs = 6000
-        vm.dirty_ratio = 80
         vm.dirty_writeback_centisecs = 50
         vm.min_free_kbytes = 2097152
         vm.mmap_min_addr = 65536
@@ -466,7 +492,7 @@ EOF
             /opt/MegaRAID/MegaCli/MegaCli64 -LDSetProp -Cached -LALL -aALL
         fi
 
-        ensure_rc_local
+        ensure_pg_tuning_service
     fi
 
     cat > /etc/security/limits.d/postgresql.conf <<- EOF
@@ -478,8 +504,8 @@ EOF
     postgres    hard    stack       unlimited
     postgres    soft    core        unlimited
     postgres    hard    core        unlimited
-    postgres    soft    memlock     250000000
-    postgres    hard    memlock     250000000
+    postgres    soft    memlock     unlimited
+    postgres    hard    memlock     unlimited
 EOF
 
     cat > /etc/security/limits.d/pgbouncer.conf <<- EOF
@@ -490,8 +516,8 @@ EOF
     pgbouncer    hard    stack       unlimited
     pgbouncer    soft    core        unlimited
     pgbouncer    hard    core        unlimited
-    pgbouncer    soft    memlock     250000000
-    pgbouncer    hard    memlock     250000000
+    pgbouncer    soft    memlock     unlimited
+    pgbouncer    hard    memlock     unlimited
 EOF
 
     cat > /etc/security/limits.d/pgpool.conf <<- EOF
@@ -502,8 +528,8 @@ EOF
     pgpool    hard    stack       unlimited
     pgpool    soft    core        unlimited
     pgpool    hard    core        unlimited
-    pgpool    soft    memlock     250000000
-    pgpool    hard    memlock     250000000
+    pgpool    soft    memlock     unlimited
+    pgpool    hard    memlock     unlimited
 EOF
 }
 
