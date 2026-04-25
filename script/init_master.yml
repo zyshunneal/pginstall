@@ -45,6 +45,20 @@
    - name: 修改 目录 权限
      shell: "mkdir -p /var/run/postgresql && chown -R  postgres.postgres /var/run/postgresql"
 
+   - name: 拷贝标准化pg_hba文件
+     template: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     register: pg_hba_render
+
+   - name: 拷贝标准化postgrsql.conf文件
+     copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     when: ansible_memtotal_mb > 200000
+     register: pg_conf_render_high
+
+   - name: 拷贝标准化postgrsql.conf测试文件
+     copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
+     when: ansible_memtotal_mb < 200000
+     register: pg_conf_render_low
+
    - name: 探测 PostgreSQL 是否已在运行
      become: yes
      become_method: sudo
@@ -60,6 +74,25 @@
      become_user: postgres
      shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ start -w -t 3600
      when: pg_master_status.rc != 0
+
+   - name: 配置变化时重启已运行的 PostgreSQL
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl  -D /mnt/storage00/pg/data/ restart -m fast -w -t 3600
+     when:
+       - pg_master_status.rc == 0
+       - (pg_conf_render_high.changed | default(false)) or (pg_conf_render_low.changed | default(false))
+
+   - name: pg_hba 变化时 reload 已运行的 PostgreSQL
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ reload
+     when:
+       - pg_master_status.rc == 0
+       - pg_hba_render.changed | default(false)
+       - not ((pg_conf_render_high.changed | default(false)) or (pg_conf_render_low.changed | default(false)))
 
    - name: database、default yay schema and user 初始化
      script: "./user_init.sh -S {{ servername }}"
@@ -80,20 +113,6 @@
      set_fact:
           username: "{{ business_user_name.stdout }}"
           password: "{{ business_user_passswd.stdout }}"
-
-   - name: 拷贝标准化pg_hba文件
-     template: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
-     notify: reload postgresql master
-
-   - name: 拷贝标准化postgrsql.conf文件
-     copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
-     when: ansible_memtotal_mb > 200000
-     notify: restart postgresql master
-
-   - name: 拷贝标准化postgrsql.conf测试文件
-     copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
-     when: ansible_memtotal_mb < 200000
-     notify: restart postgresql master
 
    - name: 获取业务用户认证密文
      become: yes
