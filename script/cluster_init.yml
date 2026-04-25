@@ -2,6 +2,8 @@
 ---
 - import_playbook: init_prepare.yml
   tags: prepare check
+- import_playbook: gather_state.yml
+  tags: gather state
 - import_playbook: init_postgresql.yml
   tags: install postgresql
 - import_playbook: init_master.yml

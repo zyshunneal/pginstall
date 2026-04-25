@@ -1,6 +1,6 @@
 #!/usr/bin/ansible-playbook
 ---
-- name: 六、重启offline和slave实例并配置pgbouncer
+- name: 六、配置 offline/slave 的 PostgreSQL 与 pgbouncer（只在配置变化时重启）
   hosts: all
   gather_facts: false
   serial: 20
@@ -8,9 +8,30 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
-   - name: 重启offline和slave实例
-     shell: su - postgres -c "chmod 0700 /mnt/storage00/pg/data/"  && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "if /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1; then /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data restart -w -t 3600; else /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600; fi"
+   - name: 修正 slave/offline 数据目录权限
+     shell: "chmod 0700 /mnt/storage00/pg/data/ && chown -R postgres.postgres /var/run/postgresql"
      when: inventory_hostname != groups["master"][0]
+     changed_when: false
+
+   - name: 探测 slave/offline PostgreSQL 状态
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status
+     register: pg_replica_status
+     changed_when: false
+     failed_when: false
+     when: inventory_hostname != groups["master"][0]
+
+   - name: 仅当未运行时启动 slave/offline PostgreSQL
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600
+     when:
+       - inventory_hostname != groups["master"][0]
+       - pg_replica_status.rc is defined
+       - pg_replica_status.rc != 0
 
    - name: 获取主库的所有pgbouncer的配置文件到本地
      fetch: "src=/etc/pgbouncer/{{ item }} dest=~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template  flat=yes"
@@ -27,12 +48,40 @@
       - userlist.txt
       - pgb_hba.conf
      when: inventory_hostname != groups["master"][0]
+     notify: restart pgbouncer replica
 
    - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
      shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
      when: inventory_hostname != groups["master"][0]
 
-   - name: 停止可能已在运行的 pgbouncer
+   - name: 探测 slave/offline 上 pgbouncer 是否已在运行
+     shell: |
+       if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
+         pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || echo)
+         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+           echo running
+           exit 0
+         fi
+       fi
+       echo stopped
+     args:
+       executable: /bin/bash
+     register: pgbouncer_replica_status
+     changed_when: false
+     when: inventory_hostname != groups["master"][0]
+
+   - name: 仅当未运行时启动 slave/offline 的 pgbouncer
+     become: yes
+     become_method: sudo
+     become_user: pgbouncer
+     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
+     when:
+       - inventory_hostname != groups["master"][0]
+       - pgbouncer_replica_status.stdout is defined
+       - pgbouncer_replica_status.stdout != 'running'
+
+  handlers:
+   - name: restart pgbouncer replica
      shell: |
        if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
          pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || true)
@@ -46,13 +95,7 @@
          fi
          rm -f /var/run/pgbouncer/pgbouncer.pid
        fi
+       sudo -u pgbouncer /usr/bin/pgbouncer -d -R -q /etc/pgbouncer/pgbouncer.ini
      args:
        executable: /bin/bash
-     when: inventory_hostname != groups["master"][0]
-
-   - name: 启动offline和slave的pgbouncer
-     become: yes
-     become_method: sudo
-     become_user: pgbouncer
-     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
      when: inventory_hostname != groups["master"][0]

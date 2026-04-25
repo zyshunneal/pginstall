@@ -19,11 +19,21 @@
    - name: 修改 目录 权限
      shell: "mkdir -p /var/run/postgresql && chown -R  postgres.postgres /var/run/postgresql"
 
-   - name: 启动数据库
+   - name: 探测 PostgreSQL 是否已在运行
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ start -w -t 3600
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ status
+     register: pg_master_status
+     changed_when: false
+     failed_when: false
+
+   - name: 仅当未运行时启动数据库
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ start -w -t 3600
+     when: pg_master_status.rc != 0
 
    - name: database、default yay schema and user 初始化
      script: "./user_init.sh -S {{ servername }}"
@@ -43,14 +53,17 @@
 
    - name: 拷贝标准化pg_hba文件
      template: src=../templates/postgresql_initialize/pg_hba.conf.master.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
+     notify: reload postgresql master
 
    - name: 拷贝标准化postgrsql.conf文件
      copy: src=../templates/postgresql_initialize/postgresql.conf.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
      when: ansible_memtotal_mb > 200000
+     notify: restart postgresql master
 
    - name: 拷贝标准化postgrsql.conf测试文件
      copy: src=../templates/postgresql_initialize/postgresql.conf.test.12.j2 dest=/mnt/storage00/pg/data/postgresql.conf  force=yes backup=yes owner=postgres group=postgres mode=0644
      when: ansible_memtotal_mb < 200000
+     notify: restart postgresql master
 
    - name: 获取业务用户认证密文
      become: yes
@@ -70,7 +83,7 @@
      become_user: postgres
      shell: psql -U postgres  -AXtqc "select rolpassword from pg_authid where rolname='{{ username }}' "
      register: user_password
-     
+
    - name: 注册变量保存业务用户密码的md5值和服务名称
      set_fact:
          md5_password: "{{ user_password.stdout }}"
@@ -78,23 +91,62 @@
 
    - name: 模板构建pgbouncer的 pgb_hba.conf 配置文件
      template: src=../templates/pgbouncer_initialize/pgb_hba.conf.j2 dest=/etc/pgbouncer/pgb_hba.conf force=yes backup=yes owner=pgbouncer  group=pgbouncer
+     notify: restart pgbouncer master
 
    - name: 模板构建 pgbouncer 的 pgbouncer.ini 配置文件
      template: src=../templates/pgbouncer_initialize/pgbouncer.ini.j2 dest=/etc/pgbouncer/pgbouncer.ini  force=yes backup=yes owner=pgbouncer  group=pgbouncer
+     notify: restart pgbouncer master
 
    - name: 模板构建 pgbouncer 的 userlist.txt 配置文件
      template: src=../templates/pgbouncer_initialize/userlist.txt.j2 dest=/etc/pgbouncer/userlist.txt  force=yes backup=yes owner=pgbouncer  group=pgbouncer mode=0600
+     notify: restart pgbouncer master
 
    - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
      shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
 
-   - name: 重启postgresql,使6、7步传入的配置文件生效
+   - name: 探测 pgbouncer 是否已在运行
+     shell: |
+       if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
+         pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || echo)
+         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+           echo running
+           exit 0
+         fi
+       fi
+       echo stopped
+     args:
+       executable: /bin/bash
+     register: pgbouncer_master_status
+     changed_when: false
+
+   - name: 仅当未运行时启动 pgbouncer
+     become: yes
+     become_method: sudo
+     become_user: pgbouncer
+     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
+     when: pgbouncer_master_status.stdout != 'running'
+
+   - name: 等待 handler 触发的服务变化落地（如果有）
+     meta: flush_handlers
+
+   - name: 主库初始化最后一步，验证用户连通性
+     shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
+     register: check_connresult
+
+  handlers:
+   - name: reload postgresql master
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_ctl  -D /mnt/storage00/pg/data/ restart -t 3600
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data/ reload
 
-   - name: 停止可能已在运行的 pgbouncer
+   - name: restart postgresql master
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl  -D /mnt/storage00/pg/data/ restart -m fast -w -t 3600
+
+   - name: restart pgbouncer master
      shell: |
        if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
          pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || true)
@@ -108,15 +160,6 @@
          fi
          rm -f /var/run/pgbouncer/pgbouncer.pid
        fi
+       sudo -u pgbouncer /usr/bin/pgbouncer -d -R -q /etc/pgbouncer/pgbouncer.ini
      args:
        executable: /bin/bash
-
-   - name: 启动 pgbouncer
-     become: yes
-     become_method: sudo
-     become_user: pgbouncer
-     shell: /usr/bin/pgbouncer -d  -R -q /etc/pgbouncer/pgbouncer.ini
-
-   - name: 主库初始化最后一步，验证用户连通性
-     shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
-     register: check_connresult

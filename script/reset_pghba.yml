@@ -8,6 +8,14 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
-   - name: 针对单独存在 offline 实例的集群进行 slave 的pg_hba.conf配置校准
+   - name: 针对存在 offline 实例的集群进行 slave 的 pg_hba.conf 配置校准
      template: src=../templates/postgresql_initialize/pg_hba.conf.offline.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
      when: (groups.offline | default([])) | length > 0
+     notify: reload postgresql slave
+
+  handlers:
+   - name: reload postgresql slave
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data reload

@@ -242,9 +242,21 @@ EOF
         ln -sf "$(command -v pgbouncer)" /usr/bin/pgbouncer
     fi
 
+    # Debian 包安装后默认会通过 systemd 启动 postgresql / pgbouncer 的 packaging unit；
+    # 我们这套部署用 pg_ctl 直接管理 cluster，不依赖 systemd unit，但也不要在它已被
+    # 我们幂等启动后再无差别 stop。仅当：
+    #   - systemd unit 处于 active
+    #   - 我们这套 cluster 不在跑（即没有 /mnt/storage00/pg/data 的 postmaster.pid）
+    # 才 stop，避免重跑误中已运行的 cluster。
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl stop postgresql >/dev/null 2>&1 || true
-        systemctl stop pgbouncer >/dev/null 2>&1 || true
+        if systemctl is-active --quiet postgresql 2>/dev/null \
+            && [ ! -f /mnt/storage00/pg/data/postmaster.pid ]; then
+            systemctl stop postgresql || true
+        fi
+        if systemctl is-active --quiet pgbouncer 2>/dev/null \
+            && [ ! -f /var/run/pgbouncer/pgbouncer.pid ]; then
+            systemctl stop pgbouncer || true
+        fi
     fi
 }
 

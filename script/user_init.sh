@@ -142,6 +142,13 @@ function user_initialization()
     password=${password//\'/?}
     password=${password//\"/?}
 
+    # 记录业务 role 是否在我们动手前就已存在；
+    # 若已存在则说明 .userinfo.conf 已丢失，本次需要 ALTER USER 把密码同步回去。
+    local role_was_present=0
+    if run_psql -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = '${business_user}';" | grep -q '^1$'; then
+        role_was_present=1
+    fi
+
     ensure_role dbrole_offline               "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
     ensure_role dbrole_readonly              "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
     ensure_role dbrole_readwrite             "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
@@ -188,13 +195,19 @@ GRANT CONNECT ON DATABASE "${dbname}" TO GROUP dbrole_readonly,dbrole_readwrite;
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${business_user}') THEN
-        CREATE USER "${business_user}" IN ROLE dbrole_readwrite_with_delete;
+        CREATE USER "${business_user}" PASSWORD '${password}' IN ROLE dbrole_readwrite_with_delete;
     END IF;
 END
 \$\$;
-ALTER USER "${business_user}" WITH PASSWORD '${password}';
 GRANT dbrole_readwrite_with_delete TO "${business_user}" GRANTED BY postgres;
 SQL
+
+    # 仅在 role 已存在（短路未命中说明 .userinfo.conf 丢失，DB 端是旧密码、文件端将是新密码）
+    # 才用新密码 ALTER 一次以恢复一致。稳态重跑会走早期短路，根本不会到这里，密码不会被旋转。
+    if [ "${role_was_present:-0}" = "1" ]; then
+        echo_log "user_init: business role pre-existed without a matching ${USERINFO_FILE}; resetting password to re-sync."
+        run_psql -v ON_ERROR_STOP=1 -d "${dbname}" -c "ALTER USER \"${business_user}\" WITH PASSWORD '${password}';"
+    fi
 
     install -d -o postgres -g postgres -m 0755 "$(dirname "${USERINFO_FILE}")" 2>/dev/null \
         || mkdir -p "$(dirname "${USERINFO_FILE}")"

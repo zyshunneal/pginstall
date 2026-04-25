@@ -1,0 +1,159 @@
+#!/usr/bin/ansible-playbook
+---
+# 二、全量状态探测：不修改任何东西，只把当前现场的关键状态聚合到 host fact `cluster_state`
+# 后续 ensure_* 阶段可基于它做更细的差异判断（比如"包已装、PG 已运行、配置已经一致 → 整段 skip"）
+# 只读特性：所有 task 都设置 changed_when: false / failed_when: false
+- name: 二、全量状态探测（只读）
+  hosts: all
+  gather_facts: false
+  serial: 20
+  any_errors_fatal: false
+  become: yes
+  become_method: sudo
+  tasks:
+    - name: 探测 OS 信息
+      shell: ". /etc/os-release && echo \"${ID}|${VERSION_ID}|${VERSION_CODENAME}\""
+      register: probe_os
+      changed_when: false
+      failed_when: false
+
+    - name: 探测 PGDG apt 源
+      shell: |
+        list=/etc/apt/sources.list.d/pgdg.list
+        key=/etc/apt/trusted.gpg.d/pgdg.gpg
+        list_md5="missing"
+        key_present="missing"
+        [ -f "$list" ] && list_md5=$(md5sum "$list" | awk '{print $1}')
+        [ -f "$key" ] && key_present="present"
+        echo "${list_md5}|${key_present}"
+      args:
+        executable: /bin/bash
+      register: probe_apt
+      changed_when: false
+      failed_when: false
+
+    - name: 探测 PG/pgbouncer/pgpool 系统账号
+      shell: |
+        for u in postgres pgbouncer pgpool; do
+          if id "$u" >/dev/null 2>&1; then echo "${u}=present"; else echo "${u}=missing"; fi
+        done
+      register: probe_accounts
+      changed_when: false
+      failed_when: false
+
+    - name: 探测目录与符号链接
+      shell: |
+        for d in /mnt/storage00/pg /mnt/storage00/pg/data /mnt/storage00/arcwal /mnt/storage00/backup /mnt/storage00/remote /home/postgres /etc/pgbouncer; do
+          [ -d "$d" ] && echo "${d}=present" || echo "${d}=missing"
+        done
+        if [ -L /pg ]; then echo "/pg=link:$(readlink -f /pg)"; elif [ -e /pg ]; then echo "/pg=dir"; else echo "/pg=missing"; fi
+        if [ -L /usr/pgsql ]; then echo "/usr/pgsql=link:$(readlink -f /usr/pgsql)"; elif [ -e /usr/pgsql ]; then echo "/usr/pgsql=dir"; else echo "/usr/pgsql=missing"; fi
+      args:
+        executable: /bin/bash
+      register: probe_dirs
+      changed_when: false
+      failed_when: false
+
+    - name: 探测 PostgreSQL 是否已 initdb
+      stat:
+        path: /mnt/storage00/pg/data/PG_VERSION
+      register: probe_pg_version_file
+
+    - name: 探测 PostgreSQL 是否在跑（pg_ctl status）
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status
+      register: probe_pg_status
+      changed_when: false
+      failed_when: false
+
+    - name: 探测 PostgreSQL 实际复制角色
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      shell: psql -U postgres -AXtqc 'SELECT pg_is_in_recovery();'
+      register: probe_pg_role
+      changed_when: false
+      failed_when: false
+      when: probe_pg_status.rc is defined and probe_pg_status.rc == 0
+
+    - name: 探测业务库是否存在
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_database WHERE datname='putong-{{ servername | default('') }}';\""
+      register: probe_business_db
+      changed_when: false
+      failed_when: false
+      when:
+        - probe_pg_status.rc is defined and probe_pg_status.rc == 0
+        - inventory_hostname == (groups['master'][0] | default(''))
+
+    - name: 探测业务用户是否存在
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_roles WHERE rolname='dbuser_{{ (servername | default('')) | replace('-','') }}';\""
+      register: probe_business_role
+      changed_when: false
+      failed_when: false
+      when:
+        - probe_pg_status.rc is defined and probe_pg_status.rc == 0
+        - inventory_hostname == (groups['master'][0] | default(''))
+
+    - name: 探测 .userinfo.conf 是否存在
+      stat:
+        path: /home/postgres/.userinfo.conf
+      register: probe_userinfo
+
+    - name: 探测 pgbouncer 进程
+      shell: |
+        if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
+          pid=$(cat /var/run/pgbouncer/pgbouncer.pid 2>/dev/null || echo)
+          if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo running
+            exit 0
+          fi
+        fi
+        echo stopped
+      args:
+        executable: /bin/bash
+      register: probe_pgbouncer_status
+      changed_when: false
+      failed_when: false
+
+    - name: 探测 pgbouncer 配置文件存在性
+      shell: |
+        for f in /etc/pgbouncer/pgbouncer.ini /etc/pgbouncer/pgb_hba.conf /etc/pgbouncer/userlist.txt; do
+          if [ -f "$f" ]; then echo "${f}=$(md5sum "$f" | awk '{print $1}')"; else echo "${f}=missing"; fi
+        done
+      args:
+        executable: /bin/bash
+      register: probe_pgbouncer_conf
+      changed_when: false
+      failed_when: false
+
+    - name: 聚合状态到 cluster_state（host fact）
+      set_fact:
+        cluster_state:
+          os: "{{ probe_os.stdout | default('unknown') }}"
+          apt: "{{ probe_apt.stdout | default('unknown') }}"
+          accounts: "{{ probe_accounts.stdout_lines | default([]) }}"
+          dirs: "{{ probe_dirs.stdout_lines | default([]) }}"
+          pg:
+            initialized: "{{ probe_pg_version_file.stat.exists | default(false) }}"
+            running: "{{ (probe_pg_status.rc | default(1)) == 0 }}"
+            role_actual: "{{ ('standby' if (probe_pg_role.stdout | default('') | trim) == 't' else 'primary') if (probe_pg_status.rc | default(1)) == 0 else 'unknown' }}"
+          business:
+            db_present: "{{ ((probe_business_db.stdout | default('')) | trim) == '1' }}"
+            role_present: "{{ ((probe_business_role.stdout | default('')) | trim) == '1' }}"
+            userinfo_present: "{{ probe_userinfo.stat.exists | default(false) }}"
+          pgbouncer:
+            running: "{{ (probe_pgbouncer_status.stdout | default('stopped') | trim) == 'running' }}"
+            conf: "{{ probe_pgbouncer_conf.stdout_lines | default([]) }}"
+
+    - name: 打印 cluster_state（仅在 -v 时可见）
+      debug:
+        var: cluster_state
+        verbosity: 1
