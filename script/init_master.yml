@@ -8,6 +8,42 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
+   - name: 读取控制机本地密码文件
+     set_fact:
+       local_secrets_raw: "{{ lookup('file', lookup('env', 'HOME') + '/.pginstall/secrets.env', errors='ignore') }}"
+     no_log: true
+
+   - name: 解析 PostgreSQL 管理密码
+     set_fact:
+       dba_password: >-
+         {{
+           (
+             local_secrets_raw
+             | regex_search('(?m)^DBA_PASSWORD=[\"'']?([^\"''\\n]+)[\"'']?\\s*$', '\\1')
+             | default([], true)
+             | first
+             | default('', true)
+           )
+           or lookup('env', 'PGINSTALL_DBA_PASSWORD')
+         }}
+       replication_password: >-
+         {{
+           (
+             local_secrets_raw
+             | regex_search('(?m)^REPLICATION_PASSWORD=[\"'']?([^\"''\\n]+)[\"'']?\\s*$', '\\1')
+             | default([], true)
+             | first
+             | default('', true)
+           )
+           or lookup('env', 'PGINSTALL_REPLICATION_PASSWORD')
+         }}
+     no_log: true
+
+   - name: 校验 PostgreSQL 管理密码已配置
+     fail:
+       msg: "缺少数据库管理密码。请在控制机 ~/.pginstall/secrets.env 配置 DBA_PASSWORD 和 REPLICATION_PASSWORD，或导出 PGINSTALL_DBA_PASSWORD / PGINSTALL_REPLICATION_PASSWORD。"
+     when: dba_password | length == 0 or replication_password | length == 0
+
    - name: 初始化postgresql实例数据目录
      become: yes
      become_method: sudo
@@ -37,6 +73,10 @@
 
    - name: database、default yay schema and user 初始化
      script: "./user_init.sh -S {{ servername }}"
+     environment:
+       DBA_PASSWORD: "{{ dba_password }}"
+       REPLICATION_PASSWORD: "{{ replication_password }}"
+     no_log: true
 
    - name: 获取业务用户的用户名
      shell: cat /home/postgres/.userinfo.conf | awk {'print $1'} | awk -F':' {'print $2'}

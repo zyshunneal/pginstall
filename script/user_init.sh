@@ -8,9 +8,6 @@ set -euo pipefail
 SCRIPT=$(readlink -f "$0")
 cd "$(dirname "$SCRIPT")"
 
-DBA_PASSWORD="Aei8ohYah7Eiz4Ah"
-REPLICATION_PASSWORD="Phaif5izei3Pij5"
-
 
 echo_success() {
     cat <<EOF
@@ -48,7 +45,9 @@ help() {
     cat << EOF
 Usage: $0 [OPTIONS]
 Options:
-    --servername -S The name of the business assumed by the database user
+    --servername            -S  The name of the business assumed by the database user
+    --dba-password              Password for dbuser_dba
+    --replication-password      Password for replication role
 EOF
 }
 
@@ -57,6 +56,14 @@ while test $# -gt 0
 do case "$1" in
         --servername|-S)
             servername=$2
+            shift
+            ;;
+        --dba-password)
+            dba_password=$2
+            shift
+            ;;
+        --replication-password)
+            replication_password=$2
             shift
             ;;
         --help)
@@ -73,6 +80,19 @@ done
 
 if [ -z "${servername:-}" ]; then
     echo_failure "parameter parse error. Please select servername" ""
+    exit 1
+fi
+
+dba_password=${dba_password:-${DBA_PASSWORD:-}}
+replication_password=${replication_password:-${REPLICATION_PASSWORD:-}}
+
+if [ -z "${dba_password:-}" ]; then
+    echo_failure "parameter parse error. Please provide --dba-password or DBA_PASSWORD" ""
+    exit 1
+fi
+
+if [ -z "${replication_password:-}" ]; then
+    echo_failure "parameter parse error. Please provide --replication-password or REPLICATION_PASSWORD" ""
     exit 1
 fi
 
@@ -167,8 +187,8 @@ function user_initialization()
     ensure_role dbrole_readwrite             "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
     ensure_role dbrole_readwrite_with_delete "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
     ensure_role dbrole_sa                    "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS"
-    ensure_role dbuser_dba                   "WITH SUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS PASSWORD '${DBA_PASSWORD}'"
-    ensure_role replication                  "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS PASSWORD '${REPLICATION_PASSWORD}'"
+    ensure_role dbuser_dba                   "WITH SUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS PASSWORD '${dba_password}'"
+    ensure_role replication                  "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN REPLICATION NOBYPASSRLS PASSWORD '${replication_password}'"
 
     run_psql -v ON_ERROR_STOP=1 <<SQL
 SET password_encryption = 'scram-sha-256';

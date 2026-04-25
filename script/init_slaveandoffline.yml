@@ -8,17 +8,44 @@
   any_errors_fatal: true
   become_method: sudo
   tasks:
+   - name: 读取控制机本地密码文件
+     set_fact:
+       local_secrets_raw: "{{ lookup('file', lookup('env', 'HOME') + '/.pginstall/secrets.env', errors='ignore') }}"
+     no_log: true
+
+   - name: 解析 replication 密码
+     set_fact:
+       replication_password: >-
+         {{
+           (
+             local_secrets_raw
+             | regex_search('(?m)^REPLICATION_PASSWORD=[\"'']?([^\"''\\n]+)[\"'']?\\s*$', '\\1')
+             | default([], true)
+             | first
+             | default('', true)
+           )
+           or lookup('env', 'PGINSTALL_REPLICATION_PASSWORD')
+         }}
+     no_log: true
+
+   - name: 校验 replication 密码已配置
+     fail:
+       msg: "缺少 replication 密码。请在控制机 ~/.pginstall/secrets.env 配置 REPLICATION_PASSWORD，或导出 PGINSTALL_REPLICATION_PASSWORD。"
+     when: replication_password | length == 0
+
    - name: 获取 postgres 用户的实际家目录（libpq 查找 ~/.pgpass 用）
      shell: "getent passwd postgres | cut -d: -f6"
      register: pg_home
      changed_when: false
 
    - name: 拷贝 pgpass 到 /home/postgres（历史路径，user_init 同目录）
-     copy: src=../templates/postgresql_initialize/pgpass dest=/home/postgres/.pgpass force=yes backup=yes owner=postgres group=postgres mode=0600
+     template: src=../templates/postgresql_initialize/pgpass.j2 dest=/home/postgres/.pgpass force=yes backup=no owner=postgres group=postgres mode=0600
+     no_log: true
 
    - name: 拷贝 pgpass 到 postgres 用户实际家目录（libpq 默认查找位置）
-     copy: src=../templates/postgresql_initialize/pgpass dest={{ pg_home.stdout }}/.pgpass force=yes backup=yes owner=postgres group=postgres mode=0600
+     template: src=../templates/postgresql_initialize/pgpass.j2 dest={{ pg_home.stdout }}/.pgpass force=yes backup=no owner=postgres group=postgres mode=0600
      when: pg_home.stdout | length > 0 and pg_home.stdout != '/home/postgres'
+     no_log: true
 
    - name: 判断 slave/offline 是否已经是 standby
      shell: |

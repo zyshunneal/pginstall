@@ -106,9 +106,40 @@ ansible-playbook cluster_init.yml -i /path/to/hosts -e "pgversion=17 servername=
 - 业务用户名：`dbuser_${servername}`，其中 `servername` 里的 `-` 会被移除。
 - 示例：`servername=my-app` 时，业务库为 `putong-my-app`，业务用户为 `dbuser_myapp`。
 
-## 5. 推荐执行流程
+## 5. 本地密码配置
 
-### 5.1 三步预检
+`dbuser_dba` 和 `replication` 密码不再写在仓库里。执行 `init_master.yml`、`init_slaveandoffline.yml` 或完整 `cluster_init.yml` 前，需要在控制机配置密码。
+
+推荐使用控制机本地隐藏文件：
+
+```bash
+mkdir -p ~/.pginstall
+chmod 700 ~/.pginstall
+cat > ~/.pginstall/secrets.env <<'EOF'
+DBA_PASSWORD='your-dba-password'
+REPLICATION_PASSWORD='your-replication-password'
+EOF
+chmod 600 ~/.pginstall/secrets.env
+```
+
+也可以用环境变量兜底：
+
+```bash
+export PGINSTALL_DBA_PASSWORD='your-dba-password'
+export PGINSTALL_REPLICATION_PASSWORD='your-replication-password'
+```
+
+读取优先级：
+
+```text
+~/.pginstall/secrets.env > PGINSTALL_DBA_PASSWORD / PGINSTALL_REPLICATION_PASSWORD
+```
+
+`REPLICATION_PASSWORD` 会同时用于创建数据库内 `replication` 角色，以及渲染目标机 postgres 用户的 `.pgpass`。
+
+## 6. 推荐执行流程
+
+### 6.1 三步预检
 
 推荐每次真跑前先执行：
 
@@ -147,7 +178,7 @@ PGVERSION=18 SERVERNAME=agent INVENTORY=/path/to/hosts ./preflight.sh
 | `SERVERNAME` | `agent` |
 | `INVENTORY` | `$HOME/test.host` |
 
-### 5.2 完整部署
+### 6.2 完整部署
 
 执行完整初始化：
 
@@ -176,7 +207,7 @@ ansible-playbook cluster_init.yml -i ~/test.host -e "pgversion=18 servername=age
 ~/cluster_init.log
 ```
 
-## 6. 主编排命令
+## 7. 主编排命令
 
 [script/cluster_init.yml](/Users/zhaoyueshun/project/pginstall/script/cluster_init.yml) 是完整入口，执行顺序如下：
 
@@ -206,7 +237,7 @@ ansible-playbook cluster_init.yml --tags cron -e "pgversion=17 servername=agent"
 
 注意：`init` 和 `slave` 这两个 tag 会命中多个导入阶段。需要精确迭代时，优先直接执行对应 playbook。
 
-## 7. 单阶段 Playbook 使用
+## 8. 单阶段 Playbook 使用
 
 ### 7.1 前置检查
 
@@ -375,7 +406,7 @@ ansible-playbook test.yml
 
 这是轻量测试入口，主要用于验证 playbook 执行链路或临时调试。它不是完整验收，正式部署后仍建议执行 `postf_check.yml`。
 
-## 8. 辅助 Shell 脚本
+## 9. 辅助 Shell 脚本
 
 ### 8.1 preflight.sh
 
@@ -440,7 +471,7 @@ sudo ./user_init.sh -S agent
 
 该脚本是辅助脚本，当前主编排不会自动调用。使用前应先阅读脚本内容并确认影响范围。
 
-## 9. 清理测试环境
+## 10. 清理测试环境
 
 危险命令：
 
@@ -467,7 +498,7 @@ ansible-playbook clean_test_cluster.yml
 
 只允许在一次性测试环境执行，不要在生产或需要保留数据的机器执行。
 
-## 10. 常用执行场景
+## 11. 常用执行场景
 
 ### 10.1 第一次完整部署
 
@@ -546,7 +577,7 @@ ansible-playbook start_slave_and_pgbouncer.yml -i ~/test.host -e "pgversion=17 s
 ansible-playbook postf_check.yml -i ~/test.host -e "pgversion=17 servername=agent"
 ```
 
-## 11. 关键路径
+## 12. 关键路径
 
 | 路径 | 说明 |
 |---|---|
@@ -562,7 +593,7 @@ ansible-playbook postf_check.yml -i ~/test.host -e "pgversion=17 servername=agen
 | `/home/postgres/.userinfo.conf` | 业务用户名和密码文件。 |
 | `~/cluster_init.log` | 控制机 Ansible 日志。 |
 
-## 12. 验收和排查命令
+## 13. 验收和排查命令
 
 查看部署日志：
 
@@ -625,7 +656,7 @@ PGPASSWORD="${password}" psql -h 127.0.0.1 -p 6432 -U "${username}" -d "putong-a
 cat /home/postgres/.userinfo.conf
 ```
 
-## 13. 常见问题
+## 14. 常见问题
 
 | 现象 | 可能原因 | 处理方式 |
 |---|---|---|
@@ -639,7 +670,7 @@ cat /home/postgres/.userinfo.conf
 | 从库已有非 standby 数据目录 | 目标机上已有未知 PG 实例 | 人工确认数据归属后再清理或更换机器。 |
 | `deploy_cron.yml` 在无 slave 时失败 | playbook 访问 `groups["slave"][0]` | 增加 slave，或不要在单 master 环境单独执行该 playbook。 |
 
-## 14. 修改代码后的最低验证
+## 15. 修改代码后的最低验证
 
 修改 playbook 或模板后，至少执行：
 

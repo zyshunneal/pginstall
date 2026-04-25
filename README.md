@@ -73,6 +73,19 @@
 - 当前用户能 `sudo` 免密。
 - 已挂载 `/mnt/storage00`（数据目录会落在这里）。
 - 能访问 `mirrors.aliyun.com`（用于安装 PG / pgbouncer 包）。
+- 控制机已配置 `~/.pginstall/secrets.env`，或导出 `PGINSTALL_DBA_PASSWORD` / `PGINSTALL_REPLICATION_PASSWORD`。
+
+密码文件示例：
+
+```bash
+mkdir -p ~/.pginstall
+chmod 700 ~/.pginstall
+cat > ~/.pginstall/secrets.env <<'EOF'
+DBA_PASSWORD='your-dba-password'
+REPLICATION_PASSWORD='your-replication-password'
+EOF
+chmod 600 ~/.pginstall/secrets.env
+```
 
 ### 2. 验证（推荐）
 
