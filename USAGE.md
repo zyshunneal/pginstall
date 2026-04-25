@@ -102,9 +102,9 @@ ansible-playbook cluster_init.yml -i /path/to/hosts -e "pgversion=17 servername=
 
 `servername` 的影响：
 
-- 业务库名：`putong-${servername}`。
-- 业务用户名：`dbuser_${servername}`，其中 `servername` 里的 `-` 会被移除。
-- 示例：`servername=my-app` 时，业务库为 `putong-my-app`，业务用户为 `dbuser_myapp`。
+- 业务库名：`${servername}`。
+- 业务用户名：`${servername}`。
+- 示例：`servername=my-app` 时，业务库为 `my-app`，业务用户为 `my-app`。
 
 ## 5. 本地密码配置
 
@@ -459,10 +459,10 @@ sudo ./user_init.sh -S agent
 作用：
 
 - 创建标准角色。
-- 创建业务库 `putong-${servername}`。
+- 创建业务库 `${servername}`。
 - 创建 `vector` 和 `vectorscale` 扩展。
 - 创建 `yay` schema 和检查表。
-- 创建业务用户 `dbuser_${servername}`。
+- 创建业务用户 `${servername}`。
 - 写入 `/home/postgres/.userinfo.conf`。
 
 该脚本依赖本机 PostgreSQL 已经启动，并且本地 socket 允许 postgres OS 用户通过 peer 认证连接。
@@ -634,20 +634,20 @@ sudo -u postgres psql -AXtqc "select pg_is_in_recovery();"
 查看向量扩展是否可用：
 
 ```bash
-sudo -u postgres psql -d "putong-agent" -AXtqc "select name, default_version, installed_version from pg_available_extensions where name in ('vector','vectorscale') order by name;"
+sudo -u postgres psql -d "agent" -AXtqc "select name, default_version, installed_version from pg_available_extensions where name in ('vector','vectorscale') order by name;"
 ```
 
 查看业务库是否已安装向量扩展：
 
 ```bash
-sudo -u postgres psql -d "putong-agent" -AXtqc "select extname, extversion from pg_extension where extname in ('vector','vectorscale') order by extname;"
+sudo -u postgres psql -d "agent" -AXtqc "select extname, extversion from pg_extension where extname in ('vector','vectorscale') order by extname;"
 ```
 
 通过 PgBouncer 连接业务库：
 
 ```bash
 source /home/postgres/.userinfo.conf
-PGPASSWORD="${password}" psql -h 127.0.0.1 -p 6432 -U "${username}" -d "putong-agent" -AXtqc "select 1;"
+PGPASSWORD="${password}" psql -h 127.0.0.1 -p 6432 -U "${username}" -d "agent" -AXtqc "select 1;"
 ```
 
 如果 `source /home/postgres/.userinfo.conf` 后变量名不符合预期，直接查看文件内容：

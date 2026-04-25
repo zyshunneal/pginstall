@@ -110,7 +110,7 @@ cd script
 ansible-playbook cluster_init.yml -e "pgversion=17 servername=agent" -i ~/test.host
 ```
 
-`servername` 决定业务库名 `putong-${servername}` 与业务用户名 `dbuser_<servername>`（去掉 `-`）。
+`servername` 同时决定业务库名和业务用户名；例如 `servername=agent` 时，业务库名和业务用户名都为 `agent`。
 
 ---
 

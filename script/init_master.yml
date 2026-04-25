@@ -170,7 +170,7 @@
      meta: flush_handlers
 
    - name: 主库初始化最后一步，验证用户连通性
-     shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d putong-{{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
+     shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1  -d {{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
      register: check_connresult
 
   handlers:

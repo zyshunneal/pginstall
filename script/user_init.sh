@@ -148,14 +148,12 @@ function user_initialization()
     local raw_password
     local password
     local server_name
-    local business_name
     local business_user
     local dbname
 
     server_name=$1
-    business_name=${server_name//-/}
-    business_user="dbuser_${business_name}"
-    dbname="putong-${server_name}"
+    business_user="${server_name}"
+    dbname="${server_name}"
 
     if [ -f "${USERINFO_FILE}" ] \
         && run_psql -AXtqc "SELECT 1 FROM pg_database WHERE datname = '${dbname}';" | grep -q '^1$' \

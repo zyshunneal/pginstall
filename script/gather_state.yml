@@ -82,7 +82,7 @@
       become: yes
       become_method: sudo
       become_user: postgres
-      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_database WHERE datname='putong-{{ servername | default('') }}';\""
+      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_database WHERE datname='{{ servername | default('') }}';\""
       register: probe_business_db
       changed_when: false
       failed_when: false
@@ -94,7 +94,7 @@
       become: yes
       become_method: sudo
       become_user: postgres
-      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_roles WHERE rolname='dbuser_{{ (servername | default('')) | replace('-','') }}';\""
+      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_roles WHERE rolname='{{ servername | default('') }}';\""
       register: probe_business_role
       changed_when: false
       failed_when: false

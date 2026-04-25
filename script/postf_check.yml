@@ -39,7 +39,7 @@
       when: inventory_hostname == groups["master"][0]
 
     - name: 主库验证用户连通性
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d putong-{{ servername }} -AXtqc "select 'master instance install success ,check OK'"
+      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d {{ servername }} -AXtqc "select 'master instance install success ,check OK'"
       register: check_connresult
       when: inventory_hostname == groups["master"][0]
 
@@ -48,11 +48,11 @@
       when: inventory_hostname == groups["master"][0]
 
     - name: 业务用户write权限TEST
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d putong-{{ servername }} -AXtqc "insert into yay.init_result_check_table(check_result) values('ok')"
+      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d {{ servername }} -AXtqc "insert into yay.init_result_check_table(check_result) values('ok')"
       when: inventory_hostname == groups["master"][0]
 
     - name: 业务用户read权限TEST
-      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d putong-{{ servername }} -AXtqc "select check_result from yay.init_result_check_table order by id desc limit 1"
+      shell: PGPASSWORD='{{ password }}' psql -U {{ username }} -p 6432 -h 127.0.0.1 -d {{ servername }} -AXtqc "select check_result from yay.init_result_check_table order by id desc limit 1"
       when: inventory_hostname == groups["master"][0]
       register: check_queryresult
 
