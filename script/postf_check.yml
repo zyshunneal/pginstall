@@ -22,20 +22,22 @@
     - name: pgbouncer 实例存活 CHECK
       shell: ps -ef | grep 'pgbouncer.ini' | grep -v grep && exit 0 || exit 1
 
-    - name: 获取业务用户的用户名
-      shell: cat /home/postgres/.userinfo.conf | awk {'print $1'} | awk -F':' {'print $2'}
-      register: business_user_name
+    - name: 注册业务库名与业务用户名（均 = servername）
+      set_fact:
+        username: "{{ servername }}"
+        dbname: "{{ servername }}"
       when: inventory_hostname == groups["master"][0]
 
     - name: 获取业务用户的密码
-      shell: cat /home/postgres/.userinfo.conf | awk {'print $2'} | awk -F':' {'print $2'}
+      shell: "awk '{ for (i=1;i<=NF;i++) if ($i ~ /^password:/) { sub(/^password:/, \"\", $i); print $i; exit } }' /home/postgres/.userinfo.conf"
       register: business_user_passswd
+      no_log: true
       when: inventory_hostname == groups["master"][0]
 
-    - name: 注册变量保存业务用户名和密码
+    - name: 注册业务用户密码
       set_fact:
-          username: "{{ business_user_name.stdout }}"
-          password: "{{ business_user_passswd.stdout }}"
+        password: "{{ business_user_passswd.stdout }}"
+      no_log: true
       when: inventory_hostname == groups["master"][0]
 
     - name: 主库验证用户连通性

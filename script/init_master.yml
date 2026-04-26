@@ -101,20 +101,27 @@
        REPLICATION_PASSWORD: "{{ replication_password }}"
      no_log: true
 
-   - name: 获取业务用户的用户名
-     shell: cat /home/postgres/.userinfo.conf | awk {'print $1'} | awk -F':' {'print $2'}
-     register: business_user_name
+   # 业务库名与业务用户名都直接等于 servername（与 user_init.sh 同一权威源）。
+   # 不再带 dbuser_ / putong- 前缀，避免 .userinfo.conf 漂移导致的不一致。
+   - name: 注册业务库名与业务用户名（均 = servername）
+     set_fact:
+       username: "{{ servername }}"
+       dbname: "{{ servername }}"
 
-   - name: 获取业务用户的密码
-     shell: cat /home/postgres/.userinfo.conf | awk {'print $2'} | awk -F':' {'print $2'}
+   - name: 获取业务用户的密码（密码无法公式化，仍从 .userinfo.conf 读）
+     shell: "awk '{ for (i=1;i<=NF;i++) if ($i ~ /^password:/) { sub(/^password:/, \"\", $i); print $i; exit } }' /home/postgres/.userinfo.conf"
      register: business_user_passswd
      no_log: true
 
-   - name: 注册变量保存业务用户名和密码
+   - name: 注册业务用户密码
      set_fact:
-          username: "{{ business_user_name.stdout }}"
-          password: "{{ business_user_passswd.stdout }}"
+       password: "{{ business_user_passswd.stdout }}"
      no_log: true
+
+   - name: 校验 .userinfo.conf 解析到非空业务密码
+     fail:
+       msg: "/home/postgres/.userinfo.conf 中未解析到业务用户密码。请检查文件格式或删除该文件后重跑（user_init.sh 会重新生成密码并 ALTER USER 同步）。"
+     when: password | length == 0
 
    - name: 模板构建pgbouncer的 pgb_hba.conf 配置文件
      template: src=../templates/pgbouncer_initialize/pgb_hba.conf.j2 dest=/etc/pgbouncer/pgb_hba.conf force=yes backup=yes owner=pgbouncer  group=pgbouncer
@@ -208,7 +215,7 @@
          - -h
          - 127.0.0.1
          - -d
-         - "putong-{{ servername }}"
+         - "{{ dbname }}"
          - -AXtqc
          - "select 'master instance install success, check OK'"
      register: check_connresult
