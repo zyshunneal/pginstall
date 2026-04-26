@@ -123,6 +123,27 @@
        msg: "/home/postgres/.userinfo.conf 中未解析到业务用户密码。请检查文件格式或删除该文件后重跑（user_init.sh 会重新生成密码并 ALTER USER 同步）。"
      when: password | length == 0
 
+   # 关键：PgBouncer 在 scram-sha-256 模式下，userlist.txt 必须存"和 PG 端完全相同的 SCRAM secret"，
+   # 否则握手算得通但 PgBouncer 转发到 PG 的二次鉴权会失败（明文经 SCRAM 算出来的 hash 与 PG 中存的 hash 不可能相同）。
+   - name: 获取业务用户在 PG 中的 SCRAM secret（用于 PgBouncer userlist.txt pass-through）
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: "psql -U postgres -AXtqc \"SELECT rolpassword FROM pg_authid WHERE rolname='{{ username }}'\""
+     register: auth_secret_query
+     changed_when: false
+     no_log: true
+
+   - name: 注册业务用户的 auth_secret
+     set_fact:
+       auth_secret: "{{ auth_secret_query.stdout }}"
+     no_log: true
+
+   - name: 校验 auth_secret 非空（业务用户必须存在且已存了 SCRAM hash）
+     fail:
+       msg: "未能从 pg_authid 取到 {{ username }} 的 rolpassword。检查 user_init.sh 是否成功创建了业务用户、PG 的 password_encryption 是否为 scram-sha-256。"
+     when: auth_secret | length == 0
+
    - name: 模板构建pgbouncer的 pgb_hba.conf 配置文件
      template: src=../templates/pgbouncer_initialize/pgb_hba.conf.j2 dest=/etc/pgbouncer/pgb_hba.conf force=yes backup=yes owner=pgbouncer  group=pgbouncer
      notify: restart pgbouncer master

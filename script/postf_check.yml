@@ -40,32 +40,73 @@
       no_log: true
       when: inventory_hostname == groups["master"][0]
 
-    - name: 主库验证用户连通性
-      shell: psql -U {{ username }} -p 6432 -h 127.0.0.1 -d {{ servername }} -AXtqc "select 'master instance install success ,check OK'"
-      environment:
-        PGPASSWORD: "{{ password }}"
+    - name: 主库验证用户连通性（走 PgBouncer，密码从 master 上的 .pgpass 读）
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      command:
+        argv:
+          - psql
+          - -w
+          - -U
+          - "{{ username }}"
+          - -p
+          - "6432"
+          - -h
+          - 127.0.0.1
+          - -d
+          - "{{ dbname }}"
+          - -AXtqc
+          - "select 'master instance install success, check OK'"
       register: check_connresult
       when: inventory_hostname == groups["master"][0]
-      no_log: true
+      changed_when: false
 
     - name: 主库验证用户连通性结果
       debug: msg="主库连通性CHECK PASS"
       when: inventory_hostname == groups["master"][0]
 
-    - name: 业务用户write权限TEST
-      shell: psql -U {{ username }} -p 6432 -h 127.0.0.1 -d {{ servername }} -AXtqc "insert into yay.init_result_check_table(check_result) values('ok')"
-      environment:
-        PGPASSWORD: "{{ password }}"
+    - name: 业务用户 write 权限 TEST
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      command:
+        argv:
+          - psql
+          - -w
+          - -U
+          - "{{ username }}"
+          - -p
+          - "6432"
+          - -h
+          - 127.0.0.1
+          - -d
+          - "{{ dbname }}"
+          - -AXtqc
+          - "insert into yay.init_result_check_table(check_result) values('ok')"
       when: inventory_hostname == groups["master"][0]
-      no_log: true
 
-    - name: 业务用户read权限TEST
-      shell: psql -U {{ username }} -p 6432 -h 127.0.0.1 -d {{ servername }} -AXtqc "select check_result from yay.init_result_check_table order by id desc limit 1"
-      environment:
-        PGPASSWORD: "{{ password }}"
+    - name: 业务用户 read 权限 TEST
+      become: yes
+      become_method: sudo
+      become_user: postgres
+      command:
+        argv:
+          - psql
+          - -w
+          - -U
+          - "{{ username }}"
+          - -p
+          - "6432"
+          - -h
+          - 127.0.0.1
+          - -d
+          - "{{ dbname }}"
+          - -AXtqc
+          - "select check_result from yay.init_result_check_table order by id desc limit 1"
       when: inventory_hostname == groups["master"][0]
       register: check_queryresult
-      no_log: true
+      changed_when: false
 
     - name: 业务用户read权限测试结果
       debug: msg="业务用户read权限测试结果PASS {{ check_queryresult.stdout }}"
