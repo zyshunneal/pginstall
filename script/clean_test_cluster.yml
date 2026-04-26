@@ -1,31 +1,240 @@
 #!/usr/bin/ansible-playbook
 ---
-- name: 测试环境一键清理
+- name: 测试环境一键彻底清理
   hosts: all
   gather_facts: false
   serial: 10
-  ignore_errors: yes
   become: yes
   become_method: sudo
+  vars:
+    generated_paths:
+      - /mnt/storage00/pg
+      - /mnt/storage00/postgresql
+      - /mnt/storage00/arcwal
+      - /mnt/storage00/backup
+      - /mnt/storage00/remote
+      - /pg
+      - /usr/pgsql
+      - /etc/pgbouncer
+      - /var/run/pgbouncer
+      - /var/log/pgbouncer
+      - /var/run/postgresql
+      - /etc/postgresql
+      - /var/lib/postgresql
+      - /var/log/postgresql
+      - /home/postgres
+    generated_files:
+      - /etc/cron.d/vacuum_and_repack_cron
+      - /etc/cron.d/postgres_backup_cron
+      - /etc/profile.d/pgsql.sh
+      - /etc/postgresql-common/createcluster.conf
+      - /etc/systemd/system/pg-tuning.service
+      - /etc/security/limits.d/postgresql.conf
+      - /etc/security/limits.d/pgbouncer.conf
+      - /etc/security/limits.d/pgpool.conf
+      - /etc/apt/sources.list.d/pgdg.list
+      - /etc/apt/sources.list.d/pigsty-cc.list
+      - /etc/apt/trusted.gpg.d/pgdg.gpg
+      - /etc/apt/trusted.gpg.d/pgdg.asc
+      - /etc/apt/keyrings/pigsty.gpg
   tasks:
-     - name: 连通性测试
-       action: ping
+    - name: 连通性测试
+      action: ping
 
-     - name: 清理之前 需要进行再次确认
-       pause: prompt="将开始清理所有数据和环境 Press return to continue. Press Ctrl+c and then a to abort"
+    - name: 清理之前需要再次确认
+      pause:
+        prompt: "将开始彻底清理 PostgreSQL / PgBouncer / PGDG/Pigsty 残留，后续需要完整重新生成。Press return to continue. Press Ctrl+c and then a to abort"
 
-     - name: stop postgresql
-       become: yes
-       become_method: sudo
-       become_user: postgres
-       shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data stop || true
+    - name: 停止本仓库管理的 PostgreSQL 实例
+      shell: |
+        if id postgres >/dev/null 2>&1 && [ -x /usr/pgsql/bin/pg_ctl ] && [ -d /mnt/storage00/pg/data ]; then
+          su - postgres -c "/usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data stop -m fast -t 120" || true
+        fi
+      args:
+        executable: /bin/bash
+      failed_when: false
 
-     - block:
-       - shell: cd /mnt/storage00 && rm -rf pg postgresql arcwal backup remote
-       - shell: cd / && rm -rf pg
-       - shell: test -f /var/run/pgbouncer/pgbouncer.pid && kill -9 $(cat /var/run/pgbouncer/pgbouncer.pid) || true
-       - shell: cd /etc/pgbouncer && rm -rf *
-       - shell: |
-           dpkg -l | awk '/^ii/ && $2 ~ /^(postgresql|postgresql-client|postgresql-common|postgresql-client-common|pgbouncer|pgpool2|postgis)/ {print $2}' \
-             | xargs -r apt-get purge -y
-           apt-get autoremove -y
+    - name: 停止 systemd 单元并清理 failed 状态
+      shell: |
+        if command -v systemctl >/dev/null 2>&1; then
+          systemctl stop postgresql pgbouncer pgpool2 pg-tuning.service || true
+          systemctl disable postgresql pgbouncer pgpool2 pg-tuning.service || true
+          systemctl reset-failed postgresql pgbouncer pgpool2 pg-tuning.service || true
+        fi
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: 杀掉残留进程和 pid 文件
+      shell: |
+        pkill -u postgres -f '/mnt/storage00/pg/data' || true
+        pkill -u pgbouncer -f '/usr/bin/pgbouncer' || true
+        pkill -u pgpool -f pgpool || true
+        if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
+          kill -9 "$(cat /var/run/pgbouncer/pgbouncer.pid)" 2>/dev/null || true
+          rm -f /var/run/pgbouncer/pgbouncer.pid
+        fi
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: 清理 grub 中的 PostgreSQL 调优内核参数
+      shell: |
+        python3 - <<'PY'
+        import re
+        from pathlib import Path
+
+        path = Path('/etc/default/grub')
+        if not path.exists():
+            raise SystemExit(0)
+
+        content = path.read_text()
+        pattern = re.compile(r'^(GRUB_CMDLINE_LINUX_DEFAULT=")([^"]*)(")$', re.M)
+
+        def repl(match):
+            args = [x for x in match.group(2).split() if x not in {'numa=off', 'transparent_hugepage=never'}]
+            return f'{match.group(1)}{" ".join(args)}{match.group(3)}'
+
+        updated = pattern.sub(repl, content)
+        if updated != content:
+            path.write_text(updated)
+        PY
+        if command -v update-grub >/dev/null 2>&1; then
+          update-grub || true
+        fi
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: 清理 sysctl.conf 中的 PostgreSQL 调优项
+      shell: |
+        python3 - <<'PY'
+        from pathlib import Path
+
+        managed_keys = {
+            'fs.aio-max-nr',
+            'fs.file-max',
+            'kernel.sem',
+            'kernel.shmmax',
+            'kernel.shmall',
+            'kernel.shmmni',
+            'net.core.netdev_max_backlog',
+            'net.core.rmem_default',
+            'net.core.rmem_max',
+            'net.core.wmem_default',
+            'net.core.wmem_max',
+            'net.core.somaxconn',
+            'net.ipv4.tcp_max_syn_backlog',
+            'net.ipv4.tcp_keepalive_intvl',
+            'net.ipv4.tcp_keepalive_probes',
+            'net.ipv4.tcp_keepalive_time',
+            'net.ipv4.tcp_mem',
+            'net.ipv4.tcp_fin_timeout',
+            'net.ipv4.tcp_synack_retries',
+            'net.ipv4.tcp_syncookies',
+            'net.ipv4.tcp_timestamps',
+            'net.ipv4.tcp_tw_reuse',
+            'net.ipv4.tcp_max_tw_buckets',
+            'net.ipv4.tcp_rmem',
+            'net.ipv4.tcp_wmem',
+            'vm.dirty_background_bytes',
+            'vm.dirty_bytes',
+            'net.ipv4.ip_local_port_range',
+            'vm.dirty_expire_centisecs',
+            'vm.dirty_writeback_centisecs',
+            'vm.min_free_kbytes',
+            'vm.mmap_min_addr',
+            'vm.swappiness',
+            'vm.overcommit_memory',
+            'vm.overcommit_ratio',
+            'vm.zone_reclaim_mode',
+        }
+
+        path = Path('/etc/sysctl.conf')
+        if not path.exists():
+            raise SystemExit(0)
+
+        original = path.read_text().splitlines()
+        filtered = []
+        for line in original:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#') or '=' not in stripped:
+                filtered.append(line)
+                continue
+            key = stripped.split('=', 1)[0].strip()
+            if key not in managed_keys:
+                filtered.append(line)
+
+        new_content = ('\n'.join(filtered).rstrip() + '\n') if filtered else ''
+        old_content = path.read_text()
+        if new_content != old_content:
+            path.write_text(new_content)
+        PY
+        sysctl --system >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: purge PostgreSQL 相关包并清理 apt 缓存
+      shell: |
+        export DEBIAN_FRONTEND=noninteractive
+        dpkg -l | awk '($1=="ii" || $1=="rc") && $2 ~ /^(postgresql|postgresql-client|postgresql-common|postgresql-client-common|pgbouncer|pgpool2|postgis)/ {print $2}' \
+          | sort -u | xargs -r apt-get purge -y
+        apt-get autoremove --purge -y
+        apt-get clean
+      args:
+        executable: /bin/bash
+
+    - name: 删除 cluster 生成的文件
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ generated_files }}"
+
+    - name: 删除 cluster 生成的目录和符号链接
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ generated_paths }}"
+
+    - name: 清理残留的 PGDG / Pigsty APT source 和 metadata
+      shell: |
+        rm -f /etc/apt/sources.list.d/pgdg*.list
+        rm -f /etc/apt/sources.list.d/pigsty*.list
+        rm -f /var/lib/apt/lists/*mirrors.aliyun.com_postgresql* || true
+        rm -f /var/lib/apt/lists/*repo.pigsty.cc* || true
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: 删除 postgres / pgbouncer / pgpool 系统账号与组
+      shell: |
+        for u in pgbouncer pgpool postgres; do
+          if id "$u" >/dev/null 2>&1; then
+            userdel -r "$u" 2>/dev/null || userdel "$u" 2>/dev/null || true
+          fi
+        done
+        for g in pgbouncer pgpool postgres; do
+          getent group "$g" >/dev/null 2>&1 && groupdel "$g" || true
+        done
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: 重新加载 systemd 配置
+      shell: |
+        if command -v systemctl >/dev/null 2>&1; then
+          systemctl daemon-reload || true
+        fi
+      args:
+        executable: /bin/bash
+      failed_when: false
+
+    - name: 删除控制机上 fetch 下来的临时模板目录
+      delegate_to: localhost
+      run_once: true
+      become: false
+      file:
+        path: "{{ lookup('env', 'HOME') + '/template_tmp/' + groups['master'][0] }}"
+        state: absent
+      when: groups.get('master', []) | length > 0
