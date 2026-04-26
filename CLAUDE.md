@@ -128,7 +128,7 @@ PgBouncer config is rendered once on the master, then `fetch`ed to the control n
 - Cluster data root is `/mnt/storage00/pg`. The data directory is the absolute path `/mnt/storage00/pg/data`. `/pg` is kept as a compat symlink to `/mnt/storage00/pg` so legacy templates (`/pg/bin/*.sh`, `/pg/arcwal`, `/pg/tlog`) keep resolving.
 - Sibling dirs: `/mnt/storage00/{arcwal,backup,remote}`.
 - The master `pg_hba.conf` enforces `local all postgres peer`. Anything that needs to run `psql -U postgres` on the local socket must do so as the `postgres` OS user — either via `become_user: postgres` on the task or, inside `user_init.sh`, via the `run_psql()` wrapper that `sudo -u postgres`-prefixes when not already postgres.
-- `pgpass` is copied to **two** locations: `/home/postgres/.pgpass` (legacy convention used by `user_init.sh`) and `$(getent passwd postgres | cut -d: -f6)/.pgpass` (the actual postgres home — `/var/lib/postgresql` on Debian — which is what libpq reads as `~/.pgpass`).
+- `.pgpass` is rendered to **two** locations: `/home/postgres/.pgpass` (legacy convention) and `$(getent passwd postgres | cut -d: -f6)/.pgpass` (the actual postgres home — `/var/lib/postgresql` on Debian — which is what libpq reads as `~/.pgpass`). On master, `pgpass.master.j2` includes both replication and business-user entries; on slave/offline, `pgpass.j2` includes only the replication entry. Do not let replica setup overwrite the master's business `.pgpass`.
 
 ## Idempotency and safety boundaries
 

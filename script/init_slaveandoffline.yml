@@ -37,14 +37,19 @@
      shell: "getent passwd postgres | cut -d: -f6"
      register: pg_home
      changed_when: false
+     when: inventory_hostname not in groups.get('master', [])
 
    - name: 拷贝 pgpass 到 /home/postgres（历史路径，user_init 同目录）
      template: src=../templates/postgresql_initialize/pgpass.j2 dest=/home/postgres/.pgpass force=yes backup=no owner=postgres group=postgres mode=0600
+     when: inventory_hostname not in groups.get('master', [])
      no_log: true
 
    - name: 拷贝 pgpass 到 postgres 用户实际家目录（libpq 默认查找位置）
      template: src=../templates/postgresql_initialize/pgpass.j2 dest={{ pg_home.stdout }}/.pgpass force=yes backup=no owner=postgres group=postgres mode=0600
-     when: pg_home.stdout | length > 0 and pg_home.stdout != '/home/postgres'
+     when:
+       - inventory_hostname not in groups.get('master', [])
+       - pg_home.stdout | length > 0
+       - pg_home.stdout != '/home/postgres'
      no_log: true
 
    - name: 判断 slave/offline 是否已经是 standby

@@ -319,7 +319,7 @@ ansible-playbook init_slaveandoffline.yml -e "pgversion=17 servername=agent"
 
 用途：
 
-- 将 `.pgpass` 分发到 postgres 用户目录。
+- 将 replication `.pgpass` 分发到 slave/offline 的 postgres 用户目录；master 的业务 `.pgpass` 由 `init_master.yml` 渲染。
 - slave 从 master 执行 `pg_basebackup`。
 - offline 从第一台 slave 执行 `pg_basebackup`。
 - 分别下发 slave/offline 的 `pg_hba.conf`。
@@ -590,8 +590,8 @@ ansible-playbook postf_check.yml -i ~/test.host -e "pgversion=17 servername=agen
 | `/usr/pgsql` | 指向 `/usr/lib/postgresql/<version>` 的兼容符号链接。 |
 | `/etc/pgbouncer` | PgBouncer 配置目录。 |
 | `/var/run/pgbouncer/pgbouncer.pid` | PgBouncer pid 文件。 |
-| `/home/postgres/.userinfo.conf` | 业务用户名和密码文件。 |
-| `/etc/pgbouncer/userlist.txt` | PgBouncer 用户文件，包含业务用户明文密码，权限 `0600`、owner `pgbouncer`。 |
+| `/home/postgres/.userinfo.conf` | master 上的业务用户名和密码权威文件。 |
+| `/etc/pgbouncer/userlist.txt` | PgBouncer 用户文件，从 `.userinfo.conf` 的同一份业务明文密码渲染，权限 `0600`、owner `pgbouncer`。 |
 | `~/cluster_init.log` | 控制机 Ansible 日志。 |
 
 ## 13. 验收和排查命令

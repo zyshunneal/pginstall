@@ -138,7 +138,7 @@ ansible-playbook cluster_init.yml -e "pgversion=17 servername=agent" -i ~/test.h
 2. **gather_state**（只读）— 探测 OS、apt 源、用户/组、目录、`PG_VERSION`、`pg_ctl status`、`pg_is_in_recovery()`、业务库 / 业务角色 / `.userinfo.conf`、pgbouncer 进程与三个配置文件 md5。结果聚合到 host fact `cluster_state`。
 3. **init_postgresql** — 跑 `postgres_install.sh`：包装 PGDG 阿里云镜像 + Pigsty 中国扩展镜像、装包、补建 `postgres / pgbouncer / pgpool` 系统账号、构建数据目录树（`/mnt/storage00/pg/{bin,conf,data,tlog,tmp}`）、`/pg → /mnt/storage00/pg` 兼容软链、`/usr/pgsql → /usr/lib/postgresql/<v>`、内核与 limits 调优。`postgresql-<v>-pgvector` 与 `postgresql-<v>-pgvectorscale` 是必装包，缺失会直接失败。
 4. **init_master** — `initdb`（`creates: PG_VERSION` 守卫）→ 启动 PG（`pg_ctl status` 守卫）→ `user_init.sh`（角色 / 业务库 / schema / 业务用户，并在业务库内 `CREATE EXTENSION vector/vectorscale`，密码同步策略见下文）→ 渲染 `postgresql.conf` / `pg_hba.conf` / pgbouncer 三件套，**仅当文件 changed** 才 `notify` handler 去 reload / restart。
-5. **init_slaveandoffline** — `.pgpass` 同步到 `/home/postgres` 和 `getent` 取到的 postgres 真实 home；探测 standby 状态：已是 standby 则停机重做、非 standby 但有 PG_VERSION 主动 `fail`、空目录直接 basebackup。
+5. **init_slaveandoffline** — replication `.pgpass` 只同步到 slave/offline 的 `/home/postgres` 和 `getent` 取到的 postgres 真实 home；探测 standby 状态：已是 standby 则停机重做、非 standby 但有 PG_VERSION 主动 `fail`、空目录直接 basebackup。
 6. **reset_pghba** — 只有 inventory 含 `offline` 时才会去校准 slave 的 `pg_hba.conf`。
 7. **start_slave_and_pgbouncer** — slave / offline 上 PG 未跑才 start；从 master 拉 pgbouncer 配置 copy 到从库，**仅 changed 时**触发 pgbouncer 重启。
 8. **postf_check** — 主从连通性、业务用户、读写、复制延迟自检。
@@ -189,7 +189,7 @@ stat -c '%y %n' /mnt/storage00/pg/data/postmaster.pid /var/run/pgbouncer/pgbounc
 - `init_postgresql.yml` 安装结束的 `systemctl stop postgresql/pgbouncer` 仅当 systemd unit `is-active` 且我们的 cluster pid 文件**不在**时才执行。
 - master `pg_hba.conf` 把 `local all postgres` 设为 `peer`：所有本地 `psql -U postgres` 必须以 `postgres` OS 用户身份执行（`become_user: postgres` 或 `user_init.sh` 内的 `run_psql` 会 `sudo -u postgres`）。
 - 业务用户密码：仅在"role 已存在但 `.userinfo.conf` 丢失"这一恢复路径下才 `ALTER USER`；正常重跑命中早期短路，密码完全不会被旋转。
-- PgBouncer 的 `/etc/pgbouncer/userlist.txt` 使用业务用户明文密码，文件权限为 `0600` 且 owner 为 `pgbouncer`；这是为了让 PgBouncer 能同时完成客户端 SCRAM 认证和后端 PostgreSQL 登录。
+- PgBouncer 的 `/etc/pgbouncer/userlist.txt` 与 master 的业务用户 `.pgpass` 都从 `/home/postgres/.userinfo.conf` 中的同一份业务明文密码渲染。`userlist.txt` 权限为 `0600` 且 owner 为 `pgbouncer`；这是为了让 PgBouncer 能同时完成客户端 SCRAM 认证和后端 PostgreSQL 登录。
 
 ---
 
@@ -205,8 +205,8 @@ stat -c '%y %n' /mnt/storage00/pg/data/postmaster.pid /var/run/pgbouncer/pgbounc
 | `/etc/pgbouncer/` | pgbouncer 配置（master 渲染，slave/offline copy）|
 | `/var/run/pgbouncer/pgbouncer.pid` | pgbouncer 进程 pid 文件 |
 | `/var/run/postgresql/` | PG 默认 unix socket 目录 |
-| `/home/postgres/` | 脚本额外创建的目录，存 `.userinfo.conf` 与一份 `.pgpass` |
-| `$(getent passwd postgres \| cut -d: -f6)/.pgpass` | libpq 真实查找的 `.pgpass`（Debian 上是 `/var/lib/postgresql/.pgpass`）|
+| `/home/postgres/` | 脚本额外创建的目录，master 上存 `.userinfo.conf` 与业务 `.pgpass`；slave/offline 上存 replication `.pgpass` |
+| `$(getent passwd postgres \| cut -d: -f6)/.pgpass` | libpq 真实查找的 `.pgpass`（Debian 上是 `/var/lib/postgresql/.pgpass`）；master 含业务用户和 replication 条目，slave/offline 只含 replication 条目 |
 | `~/cluster_init.log` | ansible run 日志，per-user 写在控制机当前用户家目录 |
 
 ---

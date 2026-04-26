@@ -1,5 +1,5 @@
 [databases]
-{{ servername }} = host=127.0.0.1
+{{ servername }} = host=127.0.0.1 port=5432 dbname={{ servername }}
 [pgbouncer]
 logfile = /var/log/pgbouncer/pgbouncer.log
 pidfile = /var/run/pgbouncer/pgbouncer.pid

@@ -53,7 +53,7 @@
        - pgb_hba.conf
      when: inventory_hostname == groups["master"][0]
 
-   - name: 获取主库 pgbouncer userlist.txt（含 SCRAM hash，敏感）
+   - name: 获取主库 pgbouncer userlist.txt（含业务用户明文密码，敏感）
      fetch:
        src: /etc/pgbouncer/userlist.txt
        dest: "~/template_tmp/{{ groups['master'][0] }}/userlist.txt.master.template"
@@ -80,7 +80,7 @@
        src: "~/template_tmp/{{ groups['master'][0] }}/userlist.txt.master.template"
        dest: /etc/pgbouncer/userlist.txt
        force: yes
-       backup: yes
+       backup: no
        owner: pgbouncer
        group: pgbouncer
        mode: "0600"
