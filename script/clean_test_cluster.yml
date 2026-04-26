@@ -207,14 +207,14 @@
         executable: /bin/bash
       failed_when: false
 
-    - name: 删除 postgres / pgbouncer / pgpool 系统账号与组
+    - name: 删除 pgbouncer / pgpool 系统账号与组
       shell: |
-        for u in pgbouncer pgpool postgres; do
+        for u in pgbouncer pgpool; do
           if id "$u" >/dev/null 2>&1; then
             userdel -r "$u" 2>/dev/null || userdel "$u" 2>/dev/null || true
           fi
         done
-        for g in pgbouncer pgpool postgres; do
+        for g in pgbouncer pgpool; do
           getent group "$g" >/dev/null 2>&1 && groupdel "$g" || true
         done
       args:
