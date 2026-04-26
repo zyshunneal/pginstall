@@ -234,7 +234,7 @@ setup_apt_sources_only() {
     fi
 
     export DEBIAN_FRONTEND=noninteractive
-    rm -f /etc/apt/sources.list.d/pgdg*.list
+    rm -f /etc/apt/sources.list.d/pgdg*.list /etc/apt/sources.list.d/pigsty*.list
     apt-get update
     apt-get install -y --no-install-recommends postgresql-common locales
 

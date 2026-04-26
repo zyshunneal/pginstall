@@ -9,28 +9,28 @@
   become_method: sudo
   tasks:
     - name: 1/6 OS / PG 版本预检 (preflight)
-      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step preflight 2>>/tmp/postgres_install.preflight.log"
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step preflight"
       register: pi_preflight
       changed_when: false
 
     - name: 2/6 配置 PGDG 阿里云 / Pigsty 中国镜像 APT 源 (apt-source)
-      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step apt-source 2>>/tmp/postgres_install.apt-source.log"
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step apt-source"
       register: pi_apt_source
 
     - name: 3/6 安装 PostgreSQL / PgBouncer / pgvector / pgvectorscale (packages)
-      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step packages 2>>/tmp/postgres_install.packages.log"
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step packages"
       register: pi_packages
 
     - name: 4/6 建立 postgres / pgbouncer / pgpool 系统账号 (accounts)
-      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step accounts 2>>/tmp/postgres_install.accounts.log"
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step accounts"
       register: pi_accounts
 
     - name: 5/6 创建数据目录树和符号链接 (dirs)
-      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step dirs 2>>/tmp/postgres_install.dirs.log"
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step dirs"
       register: pi_dirs
 
     - name: 6/6 内核 / sysctl / limits / grub / rc.local (sysctl)
-      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step sysctl 2>>/tmp/postgres_install.sysctl.log"
+      script: "./postgres_install.sh -V {{ pgversion }} -S {{ servername }} --step sysctl"
       register: pi_sysctl
 
     - name: 检查软件安装后主机连通性
