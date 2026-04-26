@@ -157,13 +157,16 @@
    - name: 等待 handler 触发的服务变化落地（如果有）
      meta: flush_handlers
 
-   # 把业务用户写到 master 自己的 .pgpass（owner postgres, 0600），
-   # 这样验证 task 不需要在命令行传明文 PGPASSWORD，psql 会自动从 .pgpass 取。
-   # 同时也让本地 dba 调试时（sudo -u postgres psql -p 6432 -h 127.0.0.1 -d putong-xxx）即开即用。
-   - name: 渲染 master 的 .pgpass（含 replication + 业务用户）
-     become: yes
-     become_method: sudo
-     become_user: postgres
+   - name: 获取 postgres 用户的实际家目录（libpq 查 ~/.pgpass 的位置）
+     shell: "getent passwd postgres | cut -d: -f6"
+     register: pg_home
+     changed_when: false
+
+   # 把业务用户写到 master 自己的 .pgpass，psql 自动取，避免命令行传明文 PGPASSWORD。
+   # Debian 包安装的 postgres 用户家目录是 /var/lib/postgresql，不是 /home/postgres，
+   # 所以两份都要写：一份到历史路径 /home/postgres，一份到 getent 实际 home，确保 psql
+   # 在 become_user: postgres 上下文中能从 ~/.pgpass 找到匹配。
+   - name: 渲染 master 的 .pgpass 到 /home/postgres（历史路径）
      template:
        src: ../templates/postgresql_initialize/pgpass.master.j2
        dest: /home/postgres/.pgpass
@@ -171,8 +174,17 @@
        group: postgres
        mode: "0600"
        force: yes
-     vars:
-       replication_password: "{{ replication_password }}"
+     no_log: true
+
+   - name: 渲染 master 的 .pgpass 到 postgres 用户实际家目录（libpq 默认查找位置）
+     template:
+       src: ../templates/postgresql_initialize/pgpass.master.j2
+       dest: "{{ pg_home.stdout }}/.pgpass"
+       owner: postgres
+       group: postgres
+       mode: "0600"
+       force: yes
+     when: pg_home.stdout | length > 0 and pg_home.stdout != '/home/postgres'
      no_log: true
 
    - name: 等待 PgBouncer 6432 端口就绪（避免 handler restart 后立刻验证撞到连接被拒）
@@ -188,6 +200,7 @@
      command:
        argv:
          - psql
+         - -w                                     # 禁止 psql 进交互式问密码：找不到 .pgpass 就直接 fail
          - -U
          - "{{ username }}"
          - -p
@@ -200,8 +213,6 @@
          - "select 'master instance install success, check OK'"
      register: check_connresult
      changed_when: false
-     # 这里显式覆盖 ansible 的 sensitive 传播：本 task 不再引用 password 变量（密码在 .pgpass 里），
-     # 真正的 psql 错误（database 不存在 / 鉴权失败 / 6432 不可达 等）需要被打印出来才能定位。
      no_log: false
 
   handlers:
