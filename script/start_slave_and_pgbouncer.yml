@@ -33,24 +33,60 @@
        - pg_replica_status.rc is defined
        - pg_replica_status.rc != 0
 
-   - name: 获取主库的所有pgbouncer的配置文件到本地
-     fetch: "src=/etc/pgbouncer/{{ item }} dest=~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template  flat=yes"
-     with_items:
-      - pgbouncer.ini
-      - userlist.txt
-      - pgb_hba.conf
-     when: inventory_hostname == groups["master"][0]
-     no_log: "{{ item == 'userlist.txt' }}"
+   # 控制机上的 fetch 落地目录可能曾被 root 跑出来过；先用当前用户身份保证目录存在且可写
+   - name: 准备控制机上 pgbouncer 模板的临时落地目录
+     delegate_to: localhost
+     run_once: true
+     become: false
+     file:
+       path: "~/template_tmp/{{ groups['master'][0] }}"
+       state: directory
+       mode: "0700"
 
-   - name: 拷贝主库pgbouncer配置文件到offline和slave实例上
-     copy: src=~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template  dest=/etc/pgbouncer/{{ item }} force=yes backup=yes owner=pgbouncer group=pgbouncer
-     with_items:
-      - pgbouncer.ini
-      - userlist.txt
-      - pgb_hba.conf
+   - name: 获取主库非敏感 pgbouncer 配置 (pgbouncer.ini / pgb_hba.conf)
+     fetch:
+       src: "/etc/pgbouncer/{{ item }}"
+       dest: "~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template"
+       flat: yes
+     loop:
+       - pgbouncer.ini
+       - pgb_hba.conf
+     when: inventory_hostname == groups["master"][0]
+
+   - name: 获取主库 pgbouncer userlist.txt（含 SCRAM hash，敏感）
+     fetch:
+       src: /etc/pgbouncer/userlist.txt
+       dest: "~/template_tmp/{{ groups['master'][0] }}/userlist.txt.master.template"
+       flat: yes
+     when: inventory_hostname == groups["master"][0]
+     no_log: true
+
+   - name: 下发非敏感 pgbouncer 配置到 offline/slave (pgbouncer.ini / pgb_hba.conf)
+     copy:
+       src: "~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template"
+       dest: "/etc/pgbouncer/{{ item }}"
+       force: yes
+       backup: yes
+       owner: pgbouncer
+       group: pgbouncer
+     loop:
+       - pgbouncer.ini
+       - pgb_hba.conf
      when: inventory_hostname != groups["master"][0]
      notify: restart pgbouncer replica
-     no_log: "{{ item == 'userlist.txt' }}"
+
+   - name: 下发 userlist.txt 到 offline/slave（敏感，单独 task 静态 no_log）
+     copy:
+       src: "~/template_tmp/{{ groups['master'][0] }}/userlist.txt.master.template"
+       dest: /etc/pgbouncer/userlist.txt
+       force: yes
+       backup: yes
+       owner: pgbouncer
+       group: pgbouncer
+       mode: "0600"
+     when: inventory_hostname != groups["master"][0]
+     notify: restart pgbouncer replica
+     no_log: true
 
    - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
      shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
