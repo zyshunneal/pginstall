@@ -189,6 +189,7 @@ stat -c '%y %n' /mnt/storage00/pg/data/postmaster.pid /var/run/pgbouncer/pgbounc
 - `init_postgresql.yml` 安装结束的 `systemctl stop postgresql/pgbouncer` 仅当 systemd unit `is-active` 且我们的 cluster pid 文件**不在**时才执行。
 - master `pg_hba.conf` 把 `local all postgres` 设为 `peer`：所有本地 `psql -U postgres` 必须以 `postgres` OS 用户身份执行（`become_user: postgres` 或 `user_init.sh` 内的 `run_psql` 会 `sudo -u postgres`）。
 - 业务用户密码：仅在"role 已存在但 `.userinfo.conf` 丢失"这一恢复路径下才 `ALTER USER`；正常重跑命中早期短路，密码完全不会被旋转。
+- PgBouncer 的 `/etc/pgbouncer/userlist.txt` 使用业务用户明文密码，文件权限为 `0600` 且 owner 为 `pgbouncer`；这是为了让 PgBouncer 能同时完成客户端 SCRAM 认证和后端 PostgreSQL 登录。
 
 ---
 

@@ -108,35 +108,13 @@
    - name: 获取业务用户的密码
      shell: cat /home/postgres/.userinfo.conf | awk {'print $2'} | awk -F':' {'print $2'}
      register: business_user_passswd
+     no_log: true
 
    - name: 注册变量保存业务用户名和密码
      set_fact:
           username: "{{ business_user_name.stdout }}"
           password: "{{ business_user_passswd.stdout }}"
-
-   - name: 获取业务用户认证密文
-     become: yes
-     become_method: sudo
-     become_user: postgres
-     shell: psql -U postgres -AXtqc "select rolpassword from pg_authid where rolname='{{ username }}'"
-     register: user_password
-
-   - name: 注册变量保存业务用户认证密文和服务名称
-     set_fact:
-         auth_secret: "{{ user_password.stdout }}"
-         servername: "{{ servername }}"
-
-   - name: 获取md5 值的业务用户密码
-     become: yes
-     become_method: sudo
-     become_user: postgres
-     shell: psql -U postgres  -AXtqc "select rolpassword from pg_authid where rolname='{{ username }}' "
-     register: user_password
-
-   - name: 注册变量保存业务用户密码的md5值和服务名称
-     set_fact:
-         md5_password: "{{ user_password.stdout }}"
-         servername: "{{ servername }}"
+     no_log: true
 
    - name: 模板构建pgbouncer的 pgb_hba.conf 配置文件
      template: src=../templates/pgbouncer_initialize/pgb_hba.conf.j2 dest=/etc/pgbouncer/pgb_hba.conf force=yes backup=yes owner=pgbouncer  group=pgbouncer
@@ -149,6 +127,7 @@
    - name: 模板构建 pgbouncer 的 userlist.txt 配置文件
      template: src=../templates/pgbouncer_initialize/userlist.txt.j2 dest=/etc/pgbouncer/userlist.txt  force=yes backup=yes owner=pgbouncer  group=pgbouncer mode=0600
      notify: restart pgbouncer master
+     no_log: true
 
    - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
      shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "

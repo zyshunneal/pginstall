@@ -591,6 +591,7 @@ ansible-playbook postf_check.yml -i ~/test.host -e "pgversion=17 servername=agen
 | `/etc/pgbouncer` | PgBouncer 配置目录。 |
 | `/var/run/pgbouncer/pgbouncer.pid` | PgBouncer pid 文件。 |
 | `/home/postgres/.userinfo.conf` | 业务用户名和密码文件。 |
+| `/etc/pgbouncer/userlist.txt` | PgBouncer 用户文件，包含业务用户明文密码，权限 `0600`、owner `pgbouncer`。 |
 | `~/cluster_init.log` | 控制机 Ansible 日志。 |
 
 ## 13. 验收和排查命令

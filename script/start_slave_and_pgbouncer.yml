@@ -40,6 +40,7 @@
       - userlist.txt
       - pgb_hba.conf
      when: inventory_hostname == groups["master"][0]
+     no_log: "{{ item == 'userlist.txt' }}"
 
    - name: 拷贝主库pgbouncer配置文件到offline和slave实例上
      copy: src=~/template_tmp/{{ groups['master'][0] }}/{{ item }}.master.template  dest=/etc/pgbouncer/{{ item }} force=yes backup=yes owner=pgbouncer group=pgbouncer
@@ -49,6 +50,7 @@
       - pgb_hba.conf
      when: inventory_hostname != groups["master"][0]
      notify: restart pgbouncer replica
+     no_log: "{{ item == 'userlist.txt' }}"
 
    - name: 创建 /var/run/pgbouncer 目录，防止因目录不存在而导致 pgbouncer启动失败
      shell: "mkdir -p /var/run/pgbouncer &&  mkdir -p /var/log/pgbouncer && chown -R  pgbouncer.pgbouncer /var/run/pgbouncer && chown -R  pgbouncer.pgbouncer /var/log/pgbouncer  "
