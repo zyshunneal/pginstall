@@ -157,12 +157,52 @@
    - name: 等待 handler 触发的服务变化落地（如果有）
      meta: flush_handlers
 
-   - name: 主库初始化最后一步，验证用户连通性
-     shell: psql -U {{ username }} -p 6432 -h 127.0.0.1  -d {{ servername }}   -AXtqc "select 'master instance install success ,check OK' "
-     environment:
-       PGPASSWORD: "{{ password }}"
-     register: check_connresult
+   # 把业务用户写到 master 自己的 .pgpass（owner postgres, 0600），
+   # 这样验证 task 不需要在命令行传明文 PGPASSWORD，psql 会自动从 .pgpass 取。
+   # 同时也让本地 dba 调试时（sudo -u postgres psql -p 6432 -h 127.0.0.1 -d putong-xxx）即开即用。
+   - name: 渲染 master 的 .pgpass（含 replication + 业务用户）
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     template:
+       src: ../templates/postgresql_initialize/pgpass.master.j2
+       dest: /home/postgres/.pgpass
+       owner: postgres
+       group: postgres
+       mode: "0600"
+       force: yes
+     vars:
+       replication_password: "{{ replication_password }}"
      no_log: true
+
+   - name: 等待 PgBouncer 6432 端口就绪（避免 handler restart 后立刻验证撞到连接被拒）
+     wait_for:
+       host: 127.0.0.1
+       port: 6432
+       timeout: 30
+
+   - name: 主库初始化最后一步，验证用户连通性（走 PgBouncer，密码从 .pgpass 读）
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     command:
+       argv:
+         - psql
+         - -U
+         - "{{ username }}"
+         - -p
+         - "6432"
+         - -h
+         - 127.0.0.1
+         - -d
+         - "putong-{{ servername }}"
+         - -AXtqc
+         - "select 'master instance install success, check OK'"
+     register: check_connresult
+     changed_when: false
+     # 这里显式覆盖 ansible 的 sensitive 传播：本 task 不再引用 password 变量（密码在 .pgpass 里），
+     # 真正的 psql 错误（database 不存在 / 鉴权失败 / 6432 不可达 等）需要被打印出来才能定位。
+     no_log: false
 
   handlers:
    - name: reload postgresql master
