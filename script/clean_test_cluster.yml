@@ -1,5 +1,8 @@
 #!/usr/bin/ansible-playbook
 ---
+- import_playbook: check_no_mysql_redis.yml
+  tags: always
+
 - name: 测试环境一键彻底清理
   hosts: all
   gather_facts: false

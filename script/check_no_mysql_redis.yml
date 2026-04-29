@@ -1,0 +1,32 @@
+#!/usr/bin/ansible-playbook
+---
+- name: 安全保护：禁止在 MySQL / Redis 运行的机器上执行
+  hosts: all
+  gather_facts: false
+  serial: 20
+  any_errors_fatal: true
+  become: yes
+  become_method: sudo
+  tasks:
+    - name: 探测 MySQL / Redis 相关进程
+      shell: |
+        ps -eo pid=,comm=,args= | awk '
+          $2 ~ /^(mysql|mysqld|mysqld_safe|mariadbd|redis-server|redis-sentinel)$/ {
+            print
+          }
+        '
+      args:
+        executable: /bin/bash
+      register: mysql_redis_processes
+      changed_when: false
+      failed_when: false
+      tags: always
+
+    - name: 检测到 MySQL / Redis 进程则终止执行
+      fail:
+        msg: |
+          警告：检测到目标机器上存在 MySQL / Redis 相关进程，为避免误操作，已终止执行。
+          请先确认并停止以下进程后重试：
+          {{ mysql_redis_processes.stdout }}
+      when: mysql_redis_processes.stdout | trim | length > 0
+      tags: always

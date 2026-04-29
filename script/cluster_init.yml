@@ -1,5 +1,7 @@
 #!/usr/bin/ansible-playbook
 ---
+- import_playbook: check_no_mysql_redis.yml
+  tags: always
 - import_playbook: init_prepare.yml
   tags: prepare check
 - import_playbook: gather_state.yml
