@@ -1,8 +1,9 @@
+{% set allowed_client_cidrs = pg_allowed_client_cidrs | default(['10.0.0.0/8', '172.0.0.0/8']) %}
 ##########以后部分为权限系统的基础，建议不要改动##########
 
 ##########只有业务账号通过PGB登录##########
 ##########保留127.0.0.1/32。用于DBA配置时验证登录##########
 host   all          {{ username }}       127.0.0.1/32    scram-sha-256
-host   all          {{ username }}       10.0.0.0/8      scram-sha-256
- 
-
+{% for cidr in allowed_client_cidrs %}
+host   all          {{ username }}       {{ cidr }}    scram-sha-256
+{% endfor %}
