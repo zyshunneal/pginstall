@@ -60,29 +60,46 @@
       register: probe_pg_version_file
 
     - name: 探测 PostgreSQL 是否在跑（pg_ctl status）
-      become: yes
-      become_method: sudo
-      become_user: postgres
-      shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status
+      shell: |
+        if ! id postgres >/dev/null 2>&1; then
+          echo "postgres user missing"
+          exit 3
+        fi
+        if [ ! -x /usr/pgsql/bin/pg_ctl ]; then
+          echo "pg_ctl missing"
+          exit 4
+        fi
+        sudo -n -u postgres /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status
+      args:
+        executable: /bin/bash
       register: probe_pg_status
       changed_when: false
       failed_when: false
 
     - name: 探测 PostgreSQL 实际复制角色
-      become: yes
-      become_method: sudo
-      become_user: postgres
-      shell: psql -U postgres -AXtqc 'SELECT pg_is_in_recovery();'
+      shell: |
+        if [ ! -x /usr/pgsql/bin/psql ]; then
+          echo "psql missing"
+          exit 4
+        fi
+        sudo -n -u postgres /usr/pgsql/bin/psql -U postgres -AXtqc 'SELECT pg_is_in_recovery();'
+      args:
+        executable: /bin/bash
       register: probe_pg_role
       changed_when: false
       failed_when: false
       when: probe_pg_status.rc is defined and probe_pg_status.rc == 0
 
     - name: 探测业务库是否存在
-      become: yes
-      become_method: sudo
-      become_user: postgres
-      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_database WHERE datname='{{ servername | default('') }}';\""
+      shell: |
+        if [ ! -x /usr/pgsql/bin/psql ]; then
+          echo "psql missing"
+          exit 4
+        fi
+        dbname={{ servername | default('') | quote }}
+        sudo -n -u postgres /usr/pgsql/bin/psql -U postgres -AXtqv "dbname=${dbname}" -c "SELECT 1 FROM pg_database WHERE datname = :'dbname';"
+      args:
+        executable: /bin/bash
       register: probe_business_db
       changed_when: false
       failed_when: false
@@ -91,10 +108,15 @@
         - inventory_hostname == (groups['master'][0] | default(''))
 
     - name: 探测业务用户是否存在
-      become: yes
-      become_method: sudo
-      become_user: postgres
-      shell: "psql -U postgres -AXtqc \"SELECT 1 FROM pg_roles WHERE rolname='{{ servername | default('') }}';\""
+      shell: |
+        if [ ! -x /usr/pgsql/bin/psql ]; then
+          echo "psql missing"
+          exit 4
+        fi
+        role_name={{ servername | default('') | quote }}
+        sudo -n -u postgres /usr/pgsql/bin/psql -U postgres -AXtqv "role_name=${role_name}" -c "SELECT 1 FROM pg_roles WHERE rolname = :'role_name';"
+      args:
+        executable: /bin/bash
       register: probe_business_role
       changed_when: false
       failed_when: false
@@ -144,7 +166,7 @@
           pg:
             initialized: "{{ probe_pg_version_file.stat.exists | default(false) }}"
             running: "{{ (probe_pg_status.rc | default(1)) == 0 }}"
-            role_actual: "{{ ('standby' if (probe_pg_role.stdout | default('') | trim) == 't' else 'primary') if (probe_pg_status.rc | default(1)) == 0 else 'unknown' }}"
+            role_actual: "{{ 'standby' if (probe_pg_role.rc | default(1)) == 0 and (probe_pg_role.stdout | default('') | trim) == 't' else 'primary' if (probe_pg_role.rc | default(1)) == 0 and (probe_pg_role.stdout | default('') | trim) == 'f' else 'unknown' }}"
           business:
             db_present: "{{ ((probe_business_db.stdout | default('')) | trim) == '1' }}"
             role_present: "{{ ((probe_business_role.stdout | default('')) | trim) == '1' }}"

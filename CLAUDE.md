@@ -175,7 +175,7 @@ PgBouncer config is rendered on the master, then `start_slave_and_pgbouncer.yml`
 - The master `pg_hba.conf` enforces `local all postgres peer`. Any local `psql -U postgres` call must run as the `postgres` OS user — either via `become_user: postgres` in Ansible or via `run_psql()` inside `user_init.sh`.
 - `.pgpass` is rendered to **two** locations: `/home/postgres/.pgpass` (legacy path) and `$(getent passwd postgres | cut -d: -f6)/.pgpass` (the actual libpq lookup path, typically `/var/lib/postgresql/.pgpass` on Debian).
 - On master, `pgpass.master.j2` includes both replication and business-user entries; on slave/offline, `pgpass.j2` includes only the replication entry. Do not let replica setup overwrite the master's business `.pgpass`.
-- PgBouncer `userlist.txt` and the master business `.pgpass` are both rendered from `/home/postgres/.userinfo.conf`; when touching authentication, keep those three artifacts aligned.
+- PgBouncer `userlist.txt` is rendered from the business user's SCRAM verifier in `pg_authid.rolpassword`; the master business `.pgpass` is rendered from `/home/postgres/.userinfo.conf`. When touching authentication, keep the DB role, `.userinfo.conf`, `.pgpass`, and PgBouncer userlist aligned.
 
 ## Idempotency and safety boundaries
 
@@ -185,8 +185,8 @@ Specific guards:
 
 - `preflight.sh state` and `gather_state.yml` are read-only probes and should stay read-only.
 - `postgres_install.sh::dir_init` reuses an existing `/mnt/storage00/pg` only when `/mnt/storage00/pg/data/PG_VERSION` is present; otherwise it cleans the stale shell and rebuilds. It never auto-deletes a real cluster.
-- `init_master.yml` `initdb` has `creates: /mnt/storage00/pg/data/PG_VERSION`; PostgreSQL starts only when `pg_ctl status` shows it is down; config changes trigger restart/reload only when the rendered files changed.
-- `init_slaveandoffline.yml` introspects each replica's data dir before `pg_basebackup`: an existing standby is stopped and re-cloned cleanly; an existing **non-standby** PG cluster on a slave/offline host is treated as unexpected state and the play `fail`s rather than overwriting.
+- `init_master.yml` `initdb --data-checksums` has `creates: /mnt/storage00/pg/data/PG_VERSION`; PostgreSQL starts only when `pg_ctl status` shows it is down; config changes trigger restart/reload only when the rendered files changed.
+- `init_slaveandoffline.yml` introspects each replica's data dir before `pg_basebackup`: an existing standby is stopped and re-cloned cleanly; an existing **non-standby** PG cluster on a slave/offline host is treated as unexpected state and the play `fail`s rather than overwriting. Each replica uses an inventory-derived physical replication slot.
 - `init_prepare.yml` lets a `postgres -D /mnt/storage00/pg/data` process keep running (so reruns do not trip on themselves) but still rejects PG processes pointing at any other datadir.
 - `user_init.sh` short-circuits when `.userinfo.conf` + the database + the business role already exist; extensions are still synced, and the business password is only reset when the role pre-existed without a matching `.userinfo.conf`.
 - `start_slave_and_pgbouncer.yml` only restarts replica PgBouncer when fetched master-side config changed.

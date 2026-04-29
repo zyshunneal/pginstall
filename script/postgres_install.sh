@@ -155,9 +155,14 @@ ensure_locale() {
 
 
 ensure_postgres_user() {
-    if id postgres >/dev/null 2>&1; then
-        install -d -o postgres -g postgres -m 0755 /home/postgres
+    if ! getent group postgres >/dev/null 2>&1; then
+        addgroup --system postgres
     fi
+    if ! id postgres >/dev/null 2>&1; then
+        adduser --system --ingroup postgres --home /var/lib/postgresql \
+            --shell /bin/bash postgres
+    fi
+    install -d -o postgres -g postgres -m 0755 /var/lib/postgresql /home/postgres
 }
 
 

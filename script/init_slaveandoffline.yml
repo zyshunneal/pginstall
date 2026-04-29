@@ -1,7 +1,7 @@
 #!/usr/bin/ansible-playbook
 ---
-- name: 四、开始构建集群slave 和 offline 的Postgresql环境"
-  hosts: all
+- name: 四、准备 slave 和 offline 的 PostgreSQL 复制环境
+  hosts: slave:offline
   gather_facts: false
   serial: 20
   become: yes
@@ -37,17 +37,14 @@
      shell: "getent passwd postgres | cut -d: -f6"
      register: pg_home
      changed_when: false
-     when: inventory_hostname not in groups.get('master', [])
 
    - name: 拷贝 pgpass 到 /home/postgres（历史路径，user_init 同目录）
      template: src=../templates/postgresql_initialize/pgpass.j2 dest=/home/postgres/.pgpass force=yes backup=no owner=postgres group=postgres mode=0600
-     when: inventory_hostname not in groups.get('master', [])
      no_log: true
 
    - name: 拷贝 pgpass 到 postgres 用户实际家目录（libpq 默认查找位置）
      template: src=../templates/postgresql_initialize/pgpass.j2 dest={{ pg_home.stdout }}/.pgpass force=yes backup=no owner=postgres group=postgres mode=0600
      when:
-       - inventory_hostname not in groups.get('master', [])
        - pg_home.stdout | length > 0
        - pg_home.stdout != '/home/postgres'
      no_log: true
@@ -63,58 +60,116 @@
        fi
      register: replica_state
      changed_when: false
-     when: inventory_hostname not in groups.get('master', [])
 
    - name: 已是 standby 的实例先停止，避免 basebackup 冲突
      become: yes
      become_method: sudo
      become_user: postgres
      shell: /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1 && /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data stop -m fast -t 120 || true
-     when:
-       - inventory_hostname not in groups.get('master', [])
-       - replica_state.stdout == 'already_standby'
+     when: replica_state.stdout == 'already_standby'
 
    - name: 清理残留的非 cluster 数据目录
      shell: find /mnt/storage00/pg/data -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-     when:
-       - inventory_hostname not in groups.get('master', [])
-       - replica_state.stdout in ['empty', 'already_standby']
+     when: replica_state.stdout in ['empty', 'already_standby']
 
    - name: 防止误覆盖非 standby 的已有 cluster，直接失败
      fail:
        msg: "/mnt/storage00/pg/data 已存在 PG_VERSION 但不是 standby，拒绝覆盖；需人工介入。"
-     when:
-       - inventory_hostname not in groups.get('master', [])
-       - replica_state.stdout == 'existing_non_standby'
+     when: replica_state.stdout == 'existing_non_standby'
 
-   - name: 构建slave 到 master 的主从关系
+- name: 四、构建 slave 到 master 的物理复制
+  hosts: slave
+  gather_facts: false
+  serial: 20
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+   - name: 创建当前 slave 在 master 上的物理复制槽
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_basebackup -D /mnt/storage00/pg/data -Fp -Xs -R -v -P -h {{ groups['master'][0] }} -p 5432 -U replication -c fast
-     async: 0
-     when: inventory_hostname in groups.get('slave', [])
+     delegate_to: "{{ groups['master'][0] }}"
+     shell: |
+       slot_name="{{ ('slot_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_')))[:63] }}"
+       psql -v ON_ERROR_STOP=1 -v slot_name="${slot_name}" <<'SQL'
+       SELECT pg_drop_replication_slot(:'slot_name')
+       WHERE EXISTS (
+         SELECT 1
+         FROM pg_replication_slots
+         WHERE slot_name = :'slot_name' AND NOT active AND wal_status = 'lost'
+       );
+       SELECT pg_create_physical_replication_slot(:'slot_name')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM pg_replication_slots WHERE slot_name = :'slot_name'
+       );
+       SQL
+     args:
+       executable: /bin/bash
 
-   - name: 将 slave 的pg_hba.conf标准配置copy到slave上
+   - name: 构建 slave 到 master 的主从关系
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: |
+       slot_name="{{ ('slot_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_')))[:63] }}"
+       /usr/pgsql/bin/pg_basebackup -D /mnt/storage00/pg/data -Fp -Xs -R -S "${slot_name}" -v -P -h {{ groups['master'][0] }} -p 5432 -U replication -c fast
+     args:
+       executable: /bin/bash
+
+   - name: 将 slave 的 pg_hba.conf 标准配置 copy 到 slave 上
      template: src=../templates/postgresql_initialize/pg_hba.conf.slave.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
-     when: inventory_hostname in groups.get('slave', [])
 
-   - name: 启动 salve 实例
+   - name: 启动 slave 实例
      shell: su - postgres -c "chmod 0700 /mnt/storage00/pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600"
-     when: inventory_hostname in groups.get('slave', [])
 
-   - name: 构建offline 到 某个 slave 的主从关系
+- name: 四、构建 offline 到首个 slave 的级联物理复制
+  hosts: offline
+  gather_facts: false
+  serial: 20
+  become: yes
+  any_errors_fatal: true
+  become_method: sudo
+  tasks:
+   - name: 校验 offline 需要至少一个 slave 作为上游
+     fail:
+       msg: "存在 offline 组时必须至少配置一个 slave，offline 将从 groups['slave'][0] 构建级联复制。"
+     when: groups.get('slave', []) | length == 0
+
+   - name: 创建当前 offline 在首个 slave 上的物理复制槽
      become: yes
      become_method: sudo
      become_user: postgres
-     shell: /usr/pgsql/bin/pg_basebackup -D /mnt/storage00/pg/data -Fp -Xs -R -v -P -h {{ groups['slave'][0] }} -p 5432 -U replication -c fast
-     async: 0
-     when: inventory_hostname in groups.get('offline', [])
+     delegate_to: "{{ groups['slave'][0] }}"
+     shell: |
+       slot_name="{{ ('slot_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_')))[:63] }}"
+       psql -v ON_ERROR_STOP=1 -v slot_name="${slot_name}" <<'SQL'
+       SELECT pg_drop_replication_slot(:'slot_name')
+       WHERE EXISTS (
+         SELECT 1
+         FROM pg_replication_slots
+         WHERE slot_name = :'slot_name' AND NOT active AND wal_status = 'lost'
+       );
+       SELECT pg_create_physical_replication_slot(:'slot_name')
+       WHERE NOT EXISTS (
+         SELECT 1 FROM pg_replication_slots WHERE slot_name = :'slot_name'
+       );
+       SQL
+     args:
+       executable: /bin/bash
 
-   - name: 将 offline 的pg_hba.conf标准配置copy到offline上
+   - name: 构建 offline 到首个 slave 的主从关系
+     become: yes
+     become_method: sudo
+     become_user: postgres
+     shell: |
+       slot_name="{{ ('slot_' ~ (inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_')))[:63] }}"
+       /usr/pgsql/bin/pg_basebackup -D /mnt/storage00/pg/data -Fp -Xs -R -S "${slot_name}" -v -P -h {{ groups['slave'][0] }} -p 5432 -U replication -c fast
+     args:
+       executable: /bin/bash
+
+   - name: 将 offline 的 pg_hba.conf 标准配置 copy 到 offline 上
      template: src=../templates/postgresql_initialize/pg_hba.conf.offline.j2 dest=/mnt/storage00/pg/data/pg_hba.conf force=yes backup=yes owner=postgres group=postgres mode=0600
-     when: inventory_hostname in groups.get('offline', [])
 
    - name: 启动 offline 实例
      shell: su - postgres -c "chmod 0700 /mnt/storage00/pg/data/" && chown -R postgres.postgres /var/run/postgresql && su - postgres -c "/usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data status >/dev/null 2>&1 || /usr/pgsql/bin/pg_ctl -D /mnt/storage00/pg/data start -w -t 3600"
-     when: inventory_hostname in groups.get('offline', [])

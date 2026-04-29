@@ -1,3 +1,6 @@
+# {{ ansible_managed | default('Managed by Ansible') }}
+{% set pg_major_version = (pgversion | default('17') | string).split('.')[0] | int %}
+{% set pg_mem_mb = ansible_memtotal_mb | default(4096) | int %}
 # -----------------------------
 # PostgreSQL configuration file
 # -----------------------------
@@ -118,7 +121,7 @@ password_encryption = 'scram-sha-256'	# md5 or scram-sha-256
 
 # - Memory -
 
-shared_buffers = 36GB			# min 128kB
+shared_buffers = {{ [[(pg_mem_mb * 25 // 100), 1024] | max, 65536] | min }}MB			# min 128kB
 					# (change requires restart)
 #huge_pages = try			# on, off, or try
 					# (change requires restart)
@@ -127,9 +130,9 @@ shared_buffers = 36GB			# min 128kB
 					# (change requires restart)
 # Caution: it is not advisable to set max_prepared_transactions nonzero unless
 # you actively intend to use prepared transactions.
-work_mem = 32MB				# min 64kB
-maintenance_work_mem = 4GB		# min 1MB
-#autovacuum_work_mem = -1		# min 1MB, or -1 to use maintenance_work_mem
+work_mem = {{ [[(pg_mem_mb // 4000), 8] | max, 64] | min }}MB				# min 64kB
+maintenance_work_mem = {{ [[(pg_mem_mb * 2 // 100), 512] | max, 8192] | min }}MB		# min 1MB
+autovacuum_work_mem = {{ [[(pg_mem_mb // 100), 256] | max, 4096] | min }}MB		# min 1MB, or -1 to use maintenance_work_mem
 #max_stack_depth = 2MB			# min 100kB
 #shared_memory_type = mmap		# the default is the first option
 					# supported by the operating system:
@@ -172,7 +175,13 @@ bgwriter_lru_multiplier = 5.0		# 0-10.0 multiplier on buffers scanned/round
 
 # - Asynchronous Behavior -
 
-#effective_io_concurrency = 1		# 1-1000; 0 disables prefetching
+effective_io_concurrency = 200		# 1-1000; 0 disables prefetching
+maintenance_io_concurrency = 200
+{% if pg_major_version >= 18 %}
+io_method = worker
+io_workers = 8
+io_max_concurrency = 64
+{% endif %}
 max_worker_processes = 16		# (change requires restart)
 #max_parallel_maintenance_workers = 2	# taken from max_parallel_workers
 #max_parallel_workers_per_gather = 2	# taken from max_parallel_workers
@@ -190,7 +199,7 @@ max_worker_processes = 16		# (change requires restart)
 
 # - Settings -
 
-wal_level = logical			# minimal, replica, or logical
+wal_level = {{ pg_wal_level | default('replica') }}			# minimal, replica, or logical
 					# (change requires restart)
 #fsync = on				# flush data to disk for crash safety
 					# (turning this off can cause
@@ -231,7 +240,7 @@ checkpoint_completion_target = 0.9	# checkpoint target duration, 0.0 - 1.0
 
 archive_mode = on		# enables archiving; off, on, or always
 				# (change requires restart)
-archive_command = 'wal_dir=/pg/arcwal; [ "$(date +%H)" = "12" ] && rm -rf ${wal_dir}/$(date -d "yesterday" +%Y%m%d); /bin/mkdir -p ${wal_dir}/$(date +%Y%m%d) && /usr/bin/lz4 -q -z %p > ${wal_dir}/$(date +%Y%m%d)/%f.lz4'		# command to use to archive a logfile segment
+archive_command = 'wal_dir=/pg/arcwal/$(date +%Y%m%d); final=${wal_dir}/%f.lz4; tmp=${final}.tmp.$$; /bin/mkdir -p ${wal_dir} && { [ -f ${final} ] || { /usr/bin/lz4 -q -z %p > ${tmp} && /bin/mv ${tmp} ${final}; }; }'		# command to use to archive a logfile segment
 				# placeholders: %p = path of file to archive
 				#               %f = file name only
 				# e.g. 'test ! -f /mnt/server/archivedir/%f && cp %p /mnt/server/archivedir/%f'
@@ -288,7 +297,8 @@ max_wal_senders = 16		# max number of walsender processes
 wal_keep_size = 96GB		# keeps enough WAL for standbys
 #wal_sender_timeout = 60s	# in milliseconds; 0 disables
 
-#max_replication_slots = 10	# max number of replication slots
+max_replication_slots = 16	# max number of replication slots
+max_slot_wal_keep_size = 128GB
 				# (change requires restart)
 track_commit_timestamp = on	# collect timestamp of transaction commit
 				# (change requires restart)
@@ -321,7 +331,7 @@ max_standby_streaming_delay = 3min	# max delay before canceling queries
 					# -1 allows indefinite delay
 wal_receiver_status_interval = 1s	# send replies at least this often
 					# 0 disables
-hot_standby_feedback = on		# send info from standby to prevent
+hot_standby_feedback = off		# send info from standby to prevent
 					# query conflicts
 wal_receiver_timeout = 60s		# time that receiver waits for
 					# communication from master
@@ -383,7 +393,7 @@ random_page_cost = 1.1			# same scale as above
 
 #min_parallel_table_scan_size = 8MB
 #min_parallel_index_scan_size = 512kB
-effective_cache_size = 320GB
+effective_cache_size = {{ [(pg_mem_mb * 70 // 100), 4096] | max }}MB
 
 # - Genetic Query Optimizer -
 

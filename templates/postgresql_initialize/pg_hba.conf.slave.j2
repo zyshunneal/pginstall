@@ -18,6 +18,10 @@ host replication  replication    10.189.0.0/16       scram-sha-256
 #########以上部分为配置标准，每台PG实例都应这样配置#########
 #为测试添加的的ip段
 host replication  replication    10.9.0.0/16       scram-sha-256
+#根据 inventory 动态放通 offline 节点，用于级联复制
+{% for h in groups.get('offline', []) | unique %}
+host replication  replication    {{ h }}/32         scram-sha-256
+{% endfor %}
  
 #########以下部分按照不同的PG实例角色来配置#########
 #(master实例，拒绝offline组访问)
