@@ -77,6 +77,13 @@ Lightweight smoke / ad-hoc test entrypoint:
 cd script && ansible-playbook test.yml
 ```
 
+Install per-host postgres_exporter (runs after cluster_init has produced `dbuser_monitor`; the prometheus-community Linux x86_64 binary ships with the repo at `pg_exporter/postgres_exporter`, expects `MONITOR_PASSWORD` in `~/.pginstall/secrets.env`):
+
+```bash
+cd script && ansible-playbook install_postgres_exporter.yml
+cd script && ansible-playbook install_postgres_exporter.yml --tags exporter_verify
+```
+
 Destructive cluster wipe (purges packages, data, and PgBouncer state — never run in prod):
 
 ```bash

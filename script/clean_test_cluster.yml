@@ -32,6 +32,9 @@
       - /etc/profile.d/pgsql.sh
       - /etc/postgresql-common/createcluster.conf
       - /etc/systemd/system/pg-tuning.service
+      - /etc/systemd/system/postgres_exporter.service
+      - /etc/default/postgres_exporter
+      - /usr/local/bin/postgres_exporter
       - /etc/security/limits.d/postgresql.conf
       - /etc/security/limits.d/pgbouncer.conf
       - /etc/security/limits.d/pgpool.conf
@@ -60,9 +63,9 @@
     - name: 停止 systemd 单元并清理 failed 状态
       shell: |
         if command -v systemctl >/dev/null 2>&1; then
-          systemctl stop postgresql pgbouncer pgpool2 pg-tuning.service || true
-          systemctl disable postgresql pgbouncer pgpool2 pg-tuning.service || true
-          systemctl reset-failed postgresql pgbouncer pgpool2 pg-tuning.service || true
+          systemctl stop postgresql pgbouncer pgpool2 pg-tuning.service postgres_exporter.service || true
+          systemctl disable postgresql pgbouncer pgpool2 pg-tuning.service postgres_exporter.service || true
+          systemctl reset-failed postgresql pgbouncer pgpool2 pg-tuning.service postgres_exporter.service || true
         fi
       args:
         executable: /bin/bash
@@ -71,6 +74,7 @@
     - name: 杀掉残留进程和 pid 文件
       shell: |
         pkill -u postgres -f '/mnt/storage00/pg/data' || true
+        pkill -u postgres -f '/usr/local/bin/postgres_exporter' || true
         pkill -u pgbouncer -f '/usr/bin/pgbouncer' || true
         pkill -u pgpool -f pgpool || true
         if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then

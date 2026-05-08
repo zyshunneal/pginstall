@@ -1,0 +1,190 @@
+#!/usr/bin/ansible-playbook
+---
+# 独立 playbook，不被 cluster_init.yml import。前置依赖：
+#   1) PostgreSQL 已经被 cluster_init.yml 完整初始化，dbuser_monitor 存在并已被
+#      授予 pg_monitor，pg_hba 已放通 dbuser_monitor 在 127.0.0.1 与本机网段。
+#   2) 控制机 ~/.pginstall/secrets.env 中已配置 MONITOR_PASSWORD，或导出
+#      PGINSTALL_MONITOR_PASSWORD 环境变量。
+#   3) 仓库 pg_exporter/postgres_exporter 二进制存在（Linux x86_64 ELF）。
+#
+# 入口：
+#   cd script && ansible-playbook install_postgres_exporter.yml
+#
+# 标签：
+#   --tags exporter_install   仅装二进制 + unit + env
+#   --tags exporter_verify    仅做就地 /metrics 验证
+- name: 安装 postgres_exporter（per-host）
+  hosts: all
+  gather_facts: false
+  serial: 10
+  any_errors_fatal: true
+  become: yes
+  become_method: sudo
+  vars:
+    pg_exporter_bin_local: "{{ playbook_dir }}/../pg_exporter/postgres_exporter"
+    pg_exporter_bin_remote: /usr/local/bin/postgres_exporter
+    pg_exporter_env_file: /etc/default/postgres_exporter
+    pg_exporter_unit_file: /etc/systemd/system/postgres_exporter.service
+    pg_exporter_listen_port: 9187
+  tags: exporter
+
+  pre_tasks:
+    - name: 检查控制机本地密码文件
+      stat:
+        path: "{{ lookup('env', 'HOME') + '/.pginstall/secrets.env' }}"
+      delegate_to: localhost
+      run_once: yes
+      become: false
+      register: local_secrets_file
+      no_log: true
+      tags: always
+
+    - name: 读取控制机本地密码文件
+      include_vars:
+        file: "{{ lookup('env', 'HOME') + '/.pginstall/secrets.env' }}"
+        name: pginstall_secrets
+      when: local_secrets_file.stat.exists
+      no_log: true
+      tags: always
+
+    - name: 解析监控账号密码
+      set_fact:
+        monitor_password: "{{ pginstall_secrets.MONITOR_PASSWORD | default(lookup('env', 'PGINSTALL_MONITOR_PASSWORD'), true) }}"
+      no_log: true
+      tags: always
+
+    - name: 校验 MONITOR_PASSWORD 已配置
+      fail:
+        msg: "缺少监控账号密码。请在控制机 ~/.pginstall/secrets.env 配置 MONITOR_PASSWORD，或导出 PGINSTALL_MONITOR_PASSWORD。"
+      when: monitor_password | length == 0
+      tags: always
+
+    - name: 校验仓库内 postgres_exporter 二进制存在
+      stat:
+        path: "{{ pg_exporter_bin_local }}"
+      delegate_to: localhost
+      run_once: yes
+      become: false
+      register: local_bin_stat
+      tags: always
+
+    - name: 阻断：本地二进制缺失
+      fail:
+        msg: "未在 {{ pg_exporter_bin_local }} 找到 postgres_exporter 二进制。请先把 prometheus-community/postgres_exporter 的 Linux x86_64 二进制放入 pg_exporter/ 目录。"
+      when: not local_bin_stat.stat.exists
+      run_once: yes
+      tags: always
+
+  tasks:
+    - name: 预检 PostgreSQL 5432 已就绪
+      shell: |
+        if [ ! -x /usr/pgsql/bin/pg_isready ] && ! command -v pg_isready >/dev/null 2>&1; then
+          echo "pg_isready missing"; exit 4
+        fi
+        ( /usr/pgsql/bin/pg_isready -h 127.0.0.1 -p 5432 || pg_isready -h 127.0.0.1 -p 5432 )
+      args:
+        executable: /bin/bash
+      changed_when: false
+      tags: exporter_install
+
+    - name: 预检 dbuser_monitor 能直连本机 5432（select 1）
+      become: yes
+      become_user: postgres
+      shell: |
+        psql -w -h 127.0.0.1 -p 5432 -U dbuser_monitor -d postgres -AXtqc 'select 1'
+      args:
+        executable: /bin/bash
+      environment:
+        PGPASSWORD: "{{ monitor_password }}"
+      register: monitor_precheck
+      changed_when: false
+      failed_when:
+        - monitor_precheck.rc != 0 or (monitor_precheck.stdout | trim) != '1'
+      no_log: true
+      tags: exporter_install
+
+    - name: 预检通过提示
+      debug:
+        msg: "dbuser_monitor 直连 127.0.0.1:5432 OK，开始铺装 exporter。"
+      tags: exporter_install
+
+    - name: 复制 postgres_exporter 二进制到目标机
+      copy:
+        src: "{{ pg_exporter_bin_local }}"
+        dest: "{{ pg_exporter_bin_remote }}"
+        owner: root
+        group: root
+        mode: "0755"
+        force: yes
+      notify: restart postgres_exporter
+      tags: exporter_install
+
+    - name: 渲染 EnvironmentFile（含 DSN，0640 root:postgres）
+      template:
+        src: ../templates/postgres_exporter/postgres_exporter.env.j2
+        dest: "{{ pg_exporter_env_file }}"
+        owner: root
+        group: postgres
+        mode: "0640"
+        force: yes
+      no_log: true
+      notify: restart postgres_exporter
+      tags: exporter_install
+
+    - name: 渲染 systemd unit
+      template:
+        src: ../templates/postgres_exporter/postgres_exporter.service.j2
+        dest: "{{ pg_exporter_unit_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        force: yes
+      notify:
+        - reload systemd
+        - restart postgres_exporter
+      tags: exporter_install
+
+    - name: 立即落地 unit / env / 二进制变更
+      meta: flush_handlers
+
+    - name: 启用并启动 postgres_exporter
+      systemd:
+        name: postgres_exporter
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      tags: exporter_install
+
+    - name: 等待 :{{ pg_exporter_listen_port }} 端口就绪
+      wait_for:
+        host: 127.0.0.1
+        port: "{{ pg_exporter_listen_port }}"
+        timeout: 30
+      tags: exporter_verify
+
+    - name: 拉取 /metrics 并断言 pg_up=1
+      uri:
+        url: "http://127.0.0.1:{{ pg_exporter_listen_port }}/metrics"
+        return_content: yes
+      register: metrics_result
+      until: metrics_result.status == 200 and ('pg_up 1' in (metrics_result.content | default('')))
+      retries: 10
+      delay: 2
+      tags: exporter_verify
+
+    - name: 验证通过提示
+      debug:
+        msg: "postgres_exporter 启动 OK：:{{ pg_exporter_listen_port }}/metrics 返回 pg_up=1。"
+      tags: exporter_verify
+
+  handlers:
+    # handler 默认按定义顺序执行；reload systemd 必须先于 restart，
+    # 否则刚改完的 unit 还未被 systemd 重新读入。
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart postgres_exporter
+      systemd:
+        name: postgres_exporter
+        state: restarted

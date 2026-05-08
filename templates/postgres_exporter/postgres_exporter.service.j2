@@ -1,0 +1,35 @@
+[Unit]
+Description=Prometheus postgres_exporter (per-host PostgreSQL metrics)
+Documentation=https://github.com/prometheus-community/postgres_exporter
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+EnvironmentFile=/etc/default/postgres_exporter
+# DSN 通过 EnvironmentFile 注入，命令行不出现密码，避免 ps 泄漏。
+# --auto-discover-databases 让 exporter 枚举非模板库做库级采集（dbuser_monitor
+# 已显式 GRANT CONNECT 业务库，pg_hba host all dbuser_monitor 全库放通）。
+ExecStart=/usr/local/bin/postgres_exporter \
+    --web.listen-address=:9187 \
+    --auto-discover-databases
+Restart=on-failure
+RestartSec=5s
+
+# 沙箱硬化：exporter 仅做 TCP 出连本机 5432 + 监听 :9187，不需要任何特权或写盘。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
