@@ -8,15 +8,17 @@ host   all   +dbrole_readonly              127.0.0.1/32     scram-sha-256
 host   all   +dbrole_readwrite             127.0.0.1/32     scram-sha-256
 host   all   +dbrole_readwrite_with_delete 127.0.0.1/32     scram-sha-256
 host   all   +dbrole_offline               127.0.0.1/32     scram-sha-256
+host   all   dbuser_monitor                127.0.0.1/32     scram-sha-256
 host   replication  replication            127.0.0.1/32     scram-sha-256
 
-#统一放通 DBA、业务、offline 和复制账号的客户端网段
+#统一放通 DBA、业务、offline、监控 和复制账号的客户端网段
 {% for cidr in allowed_client_cidrs %}
 host   all          +dbrole_sa                    {{ cidr }}     scram-sha-256
 host   all          +dbrole_readonly              {{ cidr }}     scram-sha-256
 host   all          +dbrole_readwrite             {{ cidr }}     scram-sha-256
 host   all          +dbrole_readwrite_with_delete {{ cidr }}     scram-sha-256
 host   all          +dbrole_offline               {{ cidr }}     scram-sha-256
+host   all          dbuser_monitor                {{ cidr }}     scram-sha-256
 host   replication  replication                   {{ cidr }}     scram-sha-256
 {% endfor %}
 

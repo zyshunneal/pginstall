@@ -27,12 +27,13 @@
      set_fact:
        dba_password: "{{ pginstall_secrets.DBA_PASSWORD | default(lookup('env', 'PGINSTALL_DBA_PASSWORD'), true) }}"
        replication_password: "{{ pginstall_secrets.REPLICATION_PASSWORD | default(lookup('env', 'PGINSTALL_REPLICATION_PASSWORD'), true) }}"
+       monitor_password: "{{ pginstall_secrets.MONITOR_PASSWORD | default(lookup('env', 'PGINSTALL_MONITOR_PASSWORD'), true) }}"
      no_log: true
 
    - name: 校验 PostgreSQL 管理密码已配置
      fail:
-       msg: "缺少数据库管理密码。请在控制机 ~/.pginstall/secrets.env 配置 DBA_PASSWORD 和 REPLICATION_PASSWORD，或导出 PGINSTALL_DBA_PASSWORD / PGINSTALL_REPLICATION_PASSWORD。"
-     when: dba_password | length == 0 or replication_password | length == 0
+       msg: "缺少数据库管理密码。请在控制机 ~/.pginstall/secrets.env 配置 DBA_PASSWORD / REPLICATION_PASSWORD / MONITOR_PASSWORD，或导出 PGINSTALL_DBA_PASSWORD / PGINSTALL_REPLICATION_PASSWORD / PGINSTALL_MONITOR_PASSWORD。"
+     when: dba_password | length == 0 or replication_password | length == 0 or monitor_password | length == 0
 
    - name: 初始化postgresql实例数据目录
      become: yes
@@ -99,6 +100,7 @@
      environment:
        DBA_PASSWORD: "{{ dba_password }}"
        REPLICATION_PASSWORD: "{{ replication_password }}"
+       MONITOR_PASSWORD: "{{ monitor_password }}"
      no_log: true
 
    - name: 创建 slave 物理复制槽

@@ -129,6 +129,42 @@
         path: /home/postgres/.userinfo.conf
       register: probe_userinfo
 
+    - name: 探测监控账号 dbuser_monitor 是否存在
+      shell: |
+        if [ ! -x /usr/pgsql/bin/psql ]; then
+          echo "psql missing"
+          exit 4
+        fi
+        sudo -n -u postgres /usr/pgsql/bin/psql -U postgres -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = 'dbuser_monitor';"
+      args:
+        executable: /bin/bash
+      register: probe_monitor_role
+      changed_when: false
+      failed_when: false
+      when:
+        - probe_pg_status.rc is defined and probe_pg_status.rc == 0
+        - inventory_hostname == (groups['master'][0] | default(''))
+
+    - name: 探测监控账号是否被授予 pg_monitor 内置角色
+      shell: |
+        if [ ! -x /usr/pgsql/bin/psql ]; then
+          echo "psql missing"
+          exit 4
+        fi
+        sudo -n -u postgres /usr/pgsql/bin/psql -U postgres -AXtqc "
+          SELECT 1 FROM pg_auth_members m
+          JOIN pg_roles r1 ON m.roleid = r1.oid
+          JOIN pg_roles r2 ON m.member = r2.oid
+          WHERE r1.rolname = 'pg_monitor' AND r2.rolname = 'dbuser_monitor';"
+      args:
+        executable: /bin/bash
+      register: probe_monitor_grant
+      changed_when: false
+      failed_when: false
+      when:
+        - probe_pg_status.rc is defined and probe_pg_status.rc == 0
+        - inventory_hostname == (groups['master'][0] | default(''))
+
     - name: 探测 pgbouncer 进程
       shell: |
         if [ -f /var/run/pgbouncer/pgbouncer.pid ]; then
@@ -171,6 +207,9 @@
             db_present: "{{ ((probe_business_db.stdout | default('')) | trim) == '1' }}"
             role_present: "{{ ((probe_business_role.stdout | default('')) | trim) == '1' }}"
             userinfo_present: "{{ probe_userinfo.stat.exists | default(false) }}"
+          monitor:
+            role_present: "{{ ((probe_monitor_role.stdout | default('')) | trim) == '1' }}"
+            pg_monitor_granted: "{{ ((probe_monitor_grant.stdout | default('')) | trim) == '1' }}"
           pgbouncer:
             running: "{{ (probe_pgbouncer_status.stdout | default('stopped') | trim) == 'running' }}"
             conf: "{{ probe_pgbouncer_conf.stdout_lines | default([]) }}"

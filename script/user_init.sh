@@ -48,6 +48,7 @@ Options:
     --servername            -S  The name of the business assumed by the database user
     --dba-password              Password for dbuser_dba
     --replication-password      Password for replication role
+    --monitor-password          Password for dbuser_monitor (PG metrics exporter / DB monitoring)
 EOF
 }
 
@@ -64,6 +65,10 @@ do case "$1" in
             ;;
         --replication-password)
             replication_password=$2
+            shift
+            ;;
+        --monitor-password)
+            monitor_password=$2
             shift
             ;;
         --help)
@@ -85,6 +90,7 @@ fi
 
 dba_password=${dba_password:-${DBA_PASSWORD:-}}
 replication_password=${replication_password:-${REPLICATION_PASSWORD:-}}
+monitor_password=${monitor_password:-${MONITOR_PASSWORD:-}}
 
 if [ -z "${dba_password:-}" ]; then
     echo_failure "parameter parse error. Please provide --dba-password or DBA_PASSWORD" ""
@@ -93,6 +99,11 @@ fi
 
 if [ -z "${replication_password:-}" ]; then
     echo_failure "parameter parse error. Please provide --replication-password or REPLICATION_PASSWORD" ""
+    exit 1
+fi
+
+if [ -z "${monitor_password:-}" ]; then
+    echo_failure "parameter parse error. Please provide --monitor-password or MONITOR_PASSWORD" ""
     exit 1
 fi
 
@@ -143,6 +154,30 @@ SQL
 }
 
 
+# 监控账号 dbuser_monitor：与业务名解耦的集群级账号，密码由控制端 secrets.env 管理。
+# 必须放在 user_initialization 的短路判断之前调用，确保稳态重跑时控制端轮换的
+# MONITOR_PASSWORD 也能被 ALTER ROLE 同步到 PG。pg_monitor 是 PG 内置角色，
+# 覆盖 pg_read_all_settings / pg_read_all_stats / pg_stat_scan_tables，足够大多
+# 数 exporter（postgres_exporter / pgwatch / Pigsty）的指标采集需求。
+ensure_monitor_role() {
+    local password="$1"
+    ensure_role dbuser_monitor "WITH NOSUPERUSER INHERIT NOCREATEROLE NOCREATEDB LOGIN NOREPLICATION NOBYPASSRLS PASSWORD '${password}'"
+    run_psql -v ON_ERROR_STOP=1 <<SQL
+GRANT pg_monitor TO dbuser_monitor GRANTED BY postgres;
+SQL
+}
+
+
+# 在业务库上给监控账号显式 GRANT CONNECT，防止后续如果对 PUBLIC 做 REVOKE
+# 时把监控账号一起锁出去。短路 / 全量两条路径都要调用一次。
+grant_monitor_db_connect() {
+    local dbname="$1"
+    run_psql -v ON_ERROR_STOP=1 -d "${dbname}" <<SQL
+GRANT CONNECT ON DATABASE "${dbname}" TO dbuser_monitor;
+SQL
+}
+
+
 function user_initialization()
 {
     local raw_password
@@ -155,12 +190,18 @@ function user_initialization()
     business_user="${server_name}"
     dbname="${server_name}"
 
+    # 监控账号与业务名/库无关，先于短路判断处理，确保任何路径下都同步存在性、
+    # pg_monitor 组成员资格和 secrets.env 中的密码。
+    ensure_monitor_role "${monitor_password}"
+
     if [ -f "${USERINFO_FILE}" ] \
         && run_psql -AXtqc "SELECT 1 FROM pg_database WHERE datname = '${dbname}';" | grep -q '^1$' \
         && run_psql -AXtqc "SELECT 1 FROM pg_roles WHERE rolname = '${business_user}';" | grep -q '^1$'; then
         echo_log "user_init: ${dbname} and ${business_user} already exist, reuse ${USERINFO_FILE}."
         # 即便走短路路径也补一次扩展，覆盖"老集群、pgvector 是这一轮才装包"的场景
         ensure_extensions "${dbname}"
+        # 同样补一次监控账号在业务库的 CONNECT，覆盖"监控账号是这一轮才加进来"的场景
+        grant_monitor_db_connect "${dbname}"
         password=$(awk '{print $2}' "${USERINFO_FILE}" | awk -F':' '{print $2}')
         run_psql -v ON_ERROR_STOP=1 -d "${dbname}" -c "ALTER USER \"${business_user}\" WITH PASSWORD '${password}';"
         echo_success "{'username':${business_user}, 'password':${password}}"
@@ -200,6 +241,9 @@ SQL
 
     # 扩展统一通过 ensure_extensions 维护，短路与全量路径共用
     ensure_extensions "${dbname}"
+
+    # 监控账号 CONNECT 权限同样短路 / 全量都跑，幂等
+    grant_monitor_db_connect "${dbname}"
 
     run_psql -v ON_ERROR_STOP=1 -d "${dbname}" <<SQL
 SET password_encryption = 'scram-sha-256';

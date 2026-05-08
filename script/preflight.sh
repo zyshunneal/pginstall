@@ -62,7 +62,7 @@ run_state() {
     info "只读探测：每台机器只跑 stat/grep/pg_ctl status/SELECT 1，不写入、不重启。"
     if ansible-playbook gather_state.yml "${COMMON_ARGS[@]}" -v; then
         ok "现场探测完成。cluster_state 已通过 debug 模块在上方输出。"
-        info "重点关注 cluster_state.pg.{initialized,running,role_actual} 与 business.{db_present,role_present,userinfo_present}。"
+        info "重点关注 cluster_state.pg.{initialized,running,role_actual}、business.{db_present,role_present,userinfo_present} 与 monitor.{role_present,pg_monitor_granted}。"
         return 0
     else
         fail "探测过程中有 host 不可达或权限失败，先排查 inventory 与 SSH 连通性。"
